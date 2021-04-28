@@ -4,8 +4,7 @@ import logging
 import pickle
 from dataclasses import dataclass, field
 from typing import List, Optional
-from skimage.filters import threshold_otsu
-
+from scipy.signal import find_peaks
 from cellmincer.opto_utils import crop_center
 
 
@@ -164,7 +163,6 @@ def calculate_cross(
 
     # subtract trend
     if trend_movie is not None:
-        
         displaced_trend_movie_txy = trend_movie.padded_movie_txy[
             (trend_movie.t_padding + dt):(trend_movie.t_padding + dt + trend_movie.original_n_frames),
             (trend_movie.x_padding + dx):(trend_movie.x_padding + dx + trend_movie.original_width),
@@ -247,24 +245,18 @@ def upsample_to_numpy(frame_xy: torch.Tensor, depth: int):
             scale_factor=2).squeeze(0).squeeze(0).cpu().numpy()
 
 
-def get_continuous_1d_mask(mask_t: np.ndarray) -> np.ndarray:
-    new_mask_t = mask_t.copy()
-    converged = False
-    assert len(mask_t) >= 3
-    while True:
-        converged = True
-        for i_t in range(1, len(mask_t) - 1):
-            if (~new_mask_t[i_t]) and (new_mask_t[i_t - 1] and new_mask_t[i_t + 1]):
-                converged = False
-                break
-            if (new_mask_t[i_t]) and ((~new_mask_t[i_t - 1]) and (~new_mask_t[i_t + 1])):
-                converged = False
-                break
-        if converged:
-            break
-        else:
-            new_mask_t[1:] = new_mask_t[1:] | new_mask_t[:-1]
-    return new_mask_t
+def get_continuous_1d_mask(mask_t: np.ndarray, smoothing = 11) -> np.ndarray:
+    smooth_mask_t = np.convolve(mask_t, np.ones(smoothing)/smoothing, mode='same')
+    
+#     assert len(mask_t) >= 3
+#     while True:
+#         adj_xor = np.logical_xor(new_mask_t[1:], new_mask_t[:-1])
+#         double_flip = np.logical_and(adj_xor[1:], adj_xor[:-1])
+#         if np.any(double_flip):
+#             new_mask_t[1:] |= new_mask_t[:-1]
+#         else:
+#             break
+    return smooth_mask_t > 0.5
 
     
 class OptopatchGlobalFeatureExtractor:
@@ -309,9 +301,25 @@ class OptopatchGlobalFeatureExtractor:
     def determine_active_t_range(
             ws_base: 'OptopatchBaseWorkspace',
             select_active_t_range: bool):
-        m_t = np.mean(ws_base.movie_txy, axis=(-1, -2))
+        
         if select_active_t_range:
-            threshold = 0.5 * threshold_otsu(m_t)
+            m_t = np.mean(ws_base.movie_txy, axis=(-1, -2))
+            
+            smoothing = 7
+            before_pad = smoothing // 2
+            after_pad = smoothing - before_pad - 1
+            
+            smooth_m_t = np.convolve(np.pad(m_t, (before_pad, after_pad), mode='edge'), np.ones(smoothing)/smoothing, mode='valid')
+            m_histo, m_bins = np.histogram(smooth_m_t, bins=100)
+            
+            # reasonable values, may need to be based on experiment structure (eg. n_seg, frames_per_seg)
+            prominence = np.ptp(m_histo) / 8
+            
+            peaks, _ = find_peaks(m_histo, prominence=prominence)
+            threshold = (m_bins[peaks[0]] + m_bins[peaks[1]]) / 2
+#             threshold = threshold_otsu(m_t)
+            logger.warning(f'threshold: {threshold}')
+            
             active_mask_t = get_continuous_1d_mask(m_t > threshold)
         else:
             active_mask_t = np.ones((ws_base.n_frames,), dtype=np.bool)

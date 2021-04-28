@@ -57,6 +57,12 @@ _CONV_TRANS_DICT = {
     3: torch.nn.ConvTranspose3d
 }
 
+_AVG_POOL_DICT = {
+    1: torch.nn.functional.avg_pool1d,
+    2: torch.nn.functional.avg_pool2d,
+    3: torch.nn.functional.avg_pool3d
+}
+
 _MAX_POOL_DICT = {
     1: torch.nn.functional.max_pool1d,
     2: torch.nn.functional.max_pool2d,
@@ -209,6 +215,7 @@ class ConditionalUNet(torch.nn.Module):
         self.data_dim = data_dim
         self.center_crop = _CENTER_CROP_DICT[data_dim]
         self.max_pool = _MAX_POOL_DICT[data_dim]
+        self.avg_pool = _AVG_POOL_DICT[data_dim]
         
         # downward path
         prev_channels = in_channels
@@ -292,7 +299,7 @@ class ConditionalUNet(torch.nn.Module):
                 features = self.center_crop(features, x)
                 features_list.append(features)
                 block_list.append(x)
-                features = self.max_pool(features, 2)
+                features = self.avg_pool(features, 2)
                 x = self.max_pool(x, 2)
             
         for i, up_op in enumerate(self.up_path):

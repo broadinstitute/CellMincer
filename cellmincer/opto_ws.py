@@ -66,7 +66,27 @@ class OptopatchBaseWorkspace:
         return OptopatchBaseWorkspace(
             movie_txy=movie_txy,
             dtype=dtype,
-            neighbor_dx_dy_list=neighbor_dx_dy_list) 
+            neighbor_dx_dy_list=neighbor_dx_dy_list)
+    
+    @staticmethod
+    def from_npz(
+            movie_npz_path: str,
+            order: str = 'tyx',
+            key = 'arr_0',
+            dtype = np.float32,
+            neighbor_dx_dy_list: List[Tuple[int, int]] = DEFAULT_NEIGHBOR_DX_DY_LIST):
+        # load the movie
+        log_info(f"Loading movie from {movie_npz_path} ...")
+        
+        npz_file = np.load(movie_npz_path)
+        movie_txy = npz_file[key].astype(dtype)
+        npz_file.close()
+        
+        movie_txy = movie_txy.transpose(tuple(map(order.find, 'txy')))
+        return OptopatchBaseWorkspace(
+            movie_txy=movie_txy,
+            dtype=dtype,
+            neighbor_dx_dy_list=neighbor_dx_dy_list)
 
     def get_t_truncated_movie(self, t_mask: np.ndarray) -> 'OptopatchBaseWorkspace':
         return OptopatchBaseWorkspace(
@@ -306,6 +326,9 @@ class OptopatchDenoisingWorkspace:
             self,
             scaled_bg_movie_ntxy: torch.Tensor,
             scaled_diff_movie_ntxy: torch.Tensor) -> torch.Tensor:
+        if self.noise_params is None:
+            raise Exception('Cannot model variance with undefined noise parameters')
+        
         s = self.cached_features.norm_scale
         var_ntxy = torch.clamp(
             (self.noise_params['alpha_median'] * s * (scaled_bg_movie_ntxy + scaled_diff_movie_ntxy)
