@@ -302,16 +302,15 @@ def get_noise2self_loss(
     # calculate processed features
     unet_output_list = [
         spatial_unet_processor(
-            batch_data['padded_sliced_diff_movie_ntxy'][:, i_t, :, :].view(
-                n_batch, 1, padded_x_window, padded_y_window),
+            batch_data['padded_sliced_diff_movie_ntxy'][:, i_t:i_t+1, :, :],
             batch_data['padded_global_features_nfxy'])
         for i_t in range(t_total)]
-    unet_features_ncxy_list = [output['features_ncxy'] for output in unet_output_list]
+    unet_features_nctxy = torch.stack([output['features_ncxy'] for output in unet_output_list], dim=-3)
     unet_readout_n1xy_list = [output['readout_ncxy'] for output in unet_output_list]
-    unet_features_nctxy = torch.cat([
-        unet_features_ncxy[:, :, None, :, :]
-        for unet_features_ncxy in unet_features_ncxy_list],
-        dim=-3)    
+#     unet_features_nctxy = torch.cat([
+#         unet_features_ncxy[:, :, None, :, :]
+#         for unet_features_ncxy in unet_features_ncxy_list],
+#         dim=-3)
     unet_features_width = unet_features_nctxy.shape[-2]
     unet_features_height = unet_features_nctxy.shape[-1]
     unet_cropped_global_features_nfxy = crop_center(
@@ -319,7 +318,7 @@ def get_noise2self_loss(
         target_width=unet_features_width,
         target_height=unet_features_height)
     
-    # calcualate the loss on occluded points of the middle frames
+    # calculate the loss on occluded points of the middle frames
     # and total variation loss between frames (if enabled)
     for i_t in range(t_tandem + 1):  # i_t denotes the index of the middle frames, starting from 0
 

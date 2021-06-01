@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from torch import nn
 from typing import List, Tuple, Optional, Union, Dict
 
 
@@ -40,38 +41,38 @@ def center_crop_3d(layer: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 
 
 _CONV_DICT = {
-    1: torch.nn.Conv1d,
-    2: torch.nn.Conv2d,
-    3: torch.nn.Conv3d
+    1: nn.Conv1d,
+    2: nn.Conv2d,
+    3: nn.Conv3d
 }
 
 _BATCH_NORM_DICT = {
-    1: torch.nn.BatchNorm1d,
-    2: torch.nn.BatchNorm2d,
-    3: torch.nn.BatchNorm3d
+    1: nn.BatchNorm1d,
+    2: nn.BatchNorm2d,
+    3: nn.BatchNorm3d
 }
 
 _CONV_TRANS_DICT = {
-    1: torch.nn.ConvTranspose1d,
-    2: torch.nn.ConvTranspose2d,
-    3: torch.nn.ConvTranspose3d
+    1: nn.ConvTranspose1d,
+    2: nn.ConvTranspose2d,
+    3: nn.ConvTranspose3d
 }
 
 _AVG_POOL_DICT = {
-    1: torch.nn.functional.avg_pool1d,
-    2: torch.nn.functional.avg_pool2d,
-    3: torch.nn.functional.avg_pool3d
+    1: nn.functional.avg_pool1d,
+    2: nn.functional.avg_pool2d,
+    3: nn.functional.avg_pool3d
 }
 
 _MAX_POOL_DICT = {
-    1: torch.nn.functional.max_pool1d,
-    2: torch.nn.functional.max_pool2d,
-    3: torch.nn.functional.max_pool3d
+    1: nn.functional.max_pool1d,
+    2: nn.functional.max_pool2d,
+    3: nn.functional.max_pool3d
 }
 
 _REFLECTION_PAD_DICT = {
-    1: torch.nn.ReflectionPad1d,
-    2: torch.nn.ReflectionPad2d
+    1: nn.ReflectionPad1d,
+    2: nn.ReflectionPad2d
 }
 
 _CENTER_CROP_DICT = {
@@ -81,12 +82,12 @@ _CENTER_CROP_DICT = {
 }
 
 _ACTIVATION_DICT = {
-    'relu': torch.nn.ReLU(),
-    'elu': torch.nn.ELU(),
-    'selu': torch.nn.SELU(),
-    'sigmoid': torch.nn.Sigmoid(),
-    'leaky_relu': torch.nn.LeakyReLU(),
-    'softplus': torch.nn.Softplus()
+    'relu': nn.ReLU(),
+    'elu': nn.ELU(),
+    'selu': nn.SELU(),
+    'sigmoid': nn.Sigmoid(),
+    'leaky_relu': nn.LeakyReLU(),
+    'softplus': nn.Softplus()
 }
 
 
@@ -94,7 +95,110 @@ def activation_from_str(activation_str: str):
     return _ACTIVATION_DICT[activation_str]
 
 
-class UNetConvBlock(torch.nn.Module):
+######################################################################
+
+def initialize_model(
+        model_type: dict,
+        base_config: dict,
+        mod_config: dict = None,
+        device: torch.device = torch.device('cuda'),
+        dtype: torch.dtype = torch.float32) -> DenoisingModel:
+    config = dict(base_config, **mod_config) if mod_config else base_config
+    if model_type == 'spatial-unet-2d-temporal-denoiser':
+        return SpatialUnet2dTemporalDenoiser(model_type, config, device, dtype)
+
+class DenoisingModel:
+    def __init__(
+            self,
+            name: str,
+            t_order: int):
+        
+        self.name = name
+        self.t_order = t_order
+    
+    def denoise_full_movie(
+            self,
+            movie_txy: torch.Tensor,
+            features: torch.Tensor = None
+        ) -> torch.Tensor:
+        
+        raise NotImplementedError
+    
+    def get_noise2self_loss(
+            batch_data,
+            ws_denoising_list: List[OptopatchDenoisingWorkspace],
+            loss_type: str,
+            norm_p: int,
+            enable_continuity_reg: bool,
+            reg_func: str,
+            continuity_reg_strength: float,
+            noise_threshold_to_std: float,
+            eps: float = 1e-6):
+        
+        raise NotImplementedError
+
+
+class SpatialUnet2dTemporalDenoiser(DenoisingModel):
+    def __init__(
+            self,
+            config: dict,
+            device: torch.device = torch.device('cuda'),
+            dtype: torch.dtype = torch.float32):
+        super(DenoisingModelA, self).__init__(
+            name=model_type,
+            t_order=config['t_order'])
+        
+        self.use_global_features = config['n_global_features'] > 0
+        
+        self.spatial_unet = ConditionalUNet(
+            in_channels=1,
+            out_channels=1,
+            data_dim=2,
+            feature_channels=config['n_global_features'],
+            depth=config['spatial_unet_depth'],
+            wf=config['spatial_unet_wf'],
+            out_channels_before_readout=config['spatial_unet_out_channels_before_readout'],
+            pad=config['spatial_unet_padding'],
+            batch_norm=config['spatial_unet_batch_norm'],
+            unet_kernel_size=config['spatial_unet_kernel_size'],
+            n_conv_layers=config['spatial_unet_n_conv_layers'],
+            readout_kernel_size=config['spatial_unet_readout_kernel_size'],
+            readout_hidden_layer_channels_list=config['spatial_unet_readout_hidden_layer_channels_list'],
+            activation=activation_from_str(config['spatial_unet_activation']),
+            final_trans=torch.nn.Identity(),
+            device=device,
+            dtype=dtype)
+        
+        self.temporal_denoiser = TemporalDenoiser(
+            in_channels=config['spatial_unet_out_channels_before_readout'],
+            feature_channels=ws_denoising_list[0].n_global_features,
+            t_order=self.t_order,
+            kernel_size=config['temporal_denoiser_kernel_size'],
+            hidden_conv_channels=config['temporal_denoiser_conv_channels'],
+            hidden_dense_layer_dims=config['temporal_denoiser_hidden_dense_layer_dims'],
+            activation=activation_from_str(config['temporal_denoiser_activation']),
+            final_trans=torch.nn.Identity(),
+            device=device,
+            dtype=dtype)
+    
+    def forward(
+            self,
+            x: torch.Tensor,
+            features: torch.Tensor = None
+        ) -> Tuple[torch.Tensor, torch.Tensor]:
+        
+        assert not(features is None and self.use_global_features)
+        
+        if self.use_global_features:
+            unet_out = self.spatial_unet(x, features)
+        else:
+            unet_out = self.spatial_unet(x)
+            
+        
+            
+######################################################################
+
+class UNetConvBlock(nn.Module):
     def __init__(
             self,
             in_size: int,
@@ -104,7 +208,7 @@ class UNetConvBlock(torch.nn.Module):
             data_dim: int,
             kernel_size: int,
             n_conv_layers: int,
-            activation: torch.nn.Module):
+            activation: nn.Module):
         super(UNetConvBlock, self).__init__()
         block = []
         
@@ -131,14 +235,14 @@ class UNetConvBlock(torch.nn.Module):
                 block.append(_BATCH_NORM_DICT[data_dim](out_size))
             block.append(_REFLECTION_PAD_DICT[data_dim](pad_flag * (kernel_size - 1) // 2))
 
-        self.block = torch.nn.Sequential(*block)
+        self.block = nn.Sequential(*block)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.block(x)
         return out
 
 
-class UNetUpBlock(torch.nn.Module):
+class UNetUpBlock(nn.Module):
     def __init__(
             self,
             in_size: int,
@@ -151,15 +255,16 @@ class UNetUpBlock(torch.nn.Module):
             batch_norm: bool,
             kernel_size: int,
             n_conv_layers: int,
-            activation: torch.nn.Module):
+            activation: nn.Module,
+            scale_factor: int = 2):
         super(UNetUpBlock, self).__init__()
         
         # upsampling
         if up_mode == 'upconv':
-            self.up = _CONV_TRANS_DICT[data_dim](in_size, mid_size, kernel_size=2, stride=2)
+            self.up = _CONV_TRANS_DICT[data_dim](in_size, mid_size, kernel_size=scale_factor, stride=scale_factor)
         elif up_mode == 'upsample':
-            self.up = torch.nn.Sequential(
-                torch.nn.Upsample(mode='bilinear', scale_factor=2),
+            self.up = nn.Sequential(
+                nn.Upsample(mode='bilinear', scale_factor=scale_factor2),
                 _CONV_DICT[data_dim](in_size, mid_size, kernel_size=1))
         
         self.data_dim = data_dim
@@ -175,15 +280,22 @@ class UNetUpBlock(torch.nn.Module):
             n_conv_layers=n_conv_layers,
             activation=activation)
         
+        self.use_bridge = bridge_size > 0
+        
     def forward(self, x: torch.Tensor, bridge: torch.Tensor) -> torch.Tensor:
         up = self.up(x)
-        cropped_bridge = self.center_crop(bridge, up)
-        out = torch.cat([up, cropped_bridge], - self.data_dim - 1)
-        out = self.conv_block(out)
+        
+        if self.use_bridge:
+            cropped_bridge = self.center_crop(bridge, up)
+            out = torch.cat([up, cropped_bridge], - self.data_dim - 1)
+            out = self.conv_block(out)
+        else:
+            out = self.conv_block(up)
+            
         return out
 
     
-class ConditionalUNet(torch.nn.Module):
+class ConditionalUNet(nn.Module):
     def __init__(
             self,
             in_channels: int,
@@ -193,7 +305,7 @@ class ConditionalUNet(torch.nn.Module):
             depth: int,
             wf: int,
             out_channels_before_readout: int,
-            final_trans: torch.nn.Module,
+            final_trans: nn.Module,
             pad: bool = False,
             batch_norm: bool = False,
             up_mode: str = 'upconv',
@@ -201,7 +313,7 @@ class ConditionalUNet(torch.nn.Module):
             n_conv_layers: int = 2,
             readout_hidden_layer_channels_list: List[int] = [],
             readout_kernel_size: int = 1,
-            activation: torch.nn.Module = torch.nn.SELU(),
+            activation: nn.Module = nn.SELU(),
             device: torch.device = torch.device('cuda'),
             dtype: torch.dtype = torch.float32):
         super(ConditionalUNet, self).__init__()
@@ -219,7 +331,7 @@ class ConditionalUNet(torch.nn.Module):
         
         # downward path
         prev_channels = in_channels
-        self.down_path = torch.nn.ModuleList()
+        self.down_path = nn.ModuleList()
         for i in range(depth):
             self.down_path.append(
                 UNetConvBlock(
@@ -234,7 +346,7 @@ class ConditionalUNet(torch.nn.Module):
             prev_channels = 2 ** (wf + i)
 
         # upward path
-        self.up_path = torch.nn.ModuleList()
+        self.up_path = nn.ModuleList()
         for i in reversed(range(depth - 1)):
             up_in_channels = prev_channels
             up_bridge_channels = 2 ** (wf + i) + feature_channels
@@ -277,7 +389,7 @@ class ConditionalUNet(torch.nn.Module):
                 out_channels=out_channels,
                 kernel_size=readout_kernel_size))
         readout.append(_REFLECTION_PAD_DICT[data_dim](pad_flag * (readout_kernel_size - 1) // 2))
-        self.readout = torch.nn.Sequential(*readout)
+        self.readout = nn.Sequential(*readout)
         self.final_trans = final_trans
         
         # send to device
@@ -330,7 +442,7 @@ class ConditionalUNet(torch.nn.Module):
         }
 
     
-class TemporalDenoiser(torch.nn.Module):
+class TemporalDenoiser(nn.Module):
     def __init__(
             self,
             in_channels: int,
@@ -339,8 +451,8 @@ class TemporalDenoiser(torch.nn.Module):
             kernel_size: int,
             hidden_conv_channels: int,
             hidden_dense_layer_dims: List[int],
-            activation: torch.nn.Module,
-            final_trans: torch.nn.Module,
+            activation: nn.Module,
+            final_trans: nn.Module,
             device: torch.device,
             dtype: torch.dtype):
         super(TemporalDenoiser, self).__init__()
@@ -354,7 +466,7 @@ class TemporalDenoiser(torch.nn.Module):
         prev_channels = in_channels
         for _ in range(n_conv_layers):
             conv_blocks.append(
-                torch.nn.Conv3d(
+                nn.Conv3d(
                     in_channels=prev_channels,
                     out_channels=hidden_conv_channels,
                     kernel_size=(kernel_size, 1, 1)))
@@ -364,20 +476,20 @@ class TemporalDenoiser(torch.nn.Module):
         dense_blocks = []
         for hidden_dim in hidden_dense_layer_dims:
             dense_blocks.append(
-                torch.nn.Conv3d(
+                nn.Conv3d(
                     in_channels=prev_channels,
                     out_channels=hidden_dim,
                     kernel_size=(1, 1, 1)))
             dense_blocks.append(activation)
             prev_dim = hidden_dim
         dense_blocks.append(
-            torch.nn.Conv3d(
+            nn.Conv3d(
                 in_channels=prev_dim,
                 out_channels=1,
                 kernel_size=(1, 1, 1)))
         
-        self.conv_block = torch.nn.Sequential(*conv_blocks)
-        self.dense_block = torch.nn.Sequential(*dense_blocks)
+        self.conv_block = nn.Sequential(*conv_blocks)
+        self.dense_block = nn.Sequential(*dense_blocks)
         self.final_trans = final_trans
         
         self.to(device)
@@ -391,3 +503,108 @@ class TemporalDenoiser(torch.nn.Module):
         x = self.conv_block(x)
         x = self.dense_block(x)
         return self.final_trans(x[:, 0, 0, :, :])
+
+
+class AttentionCNN(nn.Module):
+    def __init__(
+            self,
+            in_channels: int,
+            out_channels: int,
+            data_dim: int,
+            feature_channels: int,
+            depth: int,
+            wf: int,
+            out_channels_before_readout: int,
+            final_trans: nn.Module,
+            pad: bool = False,
+            batch_norm: bool = False,
+            up_mode: str = 'upconv',
+            unet_kernel_size: int = 3,
+            n_conv_layers: int = 2,
+            readout_hidden_layer_channels_list: List[int] = [],
+            readout_kernel_size: int = 1,
+            activation: nn.Module = nn.SELU(),
+            device: torch.device = torch.device('cuda'),
+            dtype: torch.dtype = torch.float32):
+        super(ConditionalUNet, self).__init__()
+        
+        assert up_mode in ('upconv', 'upsample')
+        
+        if pad:
+            assert readout_kernel_size % 2 == 1
+        pad_flag = int(pad)
+        
+        self.data_dim = data_dim
+        self.center_crop = _CENTER_CROP_DICT[data_dim]
+        self.max_pool = _MAX_POOL_DICT[data_dim]
+        self.avg_pool = _AVG_POOL_DICT[data_dim]
+        
+        # downward path
+        prev_channels = in_channels
+        self.down_paths = nn.ModuleList()
+        for i in range(depth):
+            self.down_path.append(
+                UNetConvBlock(
+                    in_size=prev_channels + feature_channels,
+                    out_size=2 ** (wf + i),
+                    pad=pad,
+                    batch_norm=batch_norm,
+                    data_dim=data_dim,
+                    kernel_size=unet_kernel_size,
+                    n_conv_layers=n_conv_layers,
+                    activation=activation))
+            prev_channels = 2 ** (wf + i)
+
+        # upward blocks to revert to full resolution
+        self.up_blocks = nn.ModuleList()
+        for i in range(depth - 1):
+            up_in_channels = 2 ** (wf + i)
+            up_mid_channels = 2 ** (wf + i)
+            if i > 0:
+                up_out_channels = 2 ** (wf + i)
+            else:
+                up_out_channels = out_channels_before_readout
+            self.up_path.append(
+                UNetUpBlock(
+                    in_size=up_in_channels,
+                    mid_size=up_mid_channels,
+                    bridge_size=0,
+                    out_size=up_out_channels,
+                    up_mode=up_mode,
+                    pad=pad,
+                    batch_norm=batch_norm,
+                    data_dim=data_dim,
+                    kernel_size=unet_kernel_size,
+                    n_conv_layers=n_conv_layers,
+                    activation=activation))
+            prev_channels = up_out_channels
+
+        # final readout
+        readout = []
+        for hidden_channels in readout_hidden_layer_channels_list:
+            readout.append(
+                _CONV_DICT[data_dim](
+                    in_channels=prev_channels,
+                    out_channels=hidden_channels,
+                    kernel_size=readout_kernel_size))
+            readout.append(activation)
+            if batch_norm:
+                readout.append(_BATCH_NORM_DICT[data_dim](hidden_channels))
+            readout.append(_REFLECTION_PAD_DICT[data_dim](pad_flag * (readout_kernel_size - 1) // 2))                    
+            prev_channels = hidden_channels
+        readout.append(
+            _CONV_DICT[data_dim](
+                in_channels=prev_channels,
+                out_channels=out_channels,
+                kernel_size=readout_kernel_size))
+        readout.append(_REFLECTION_PAD_DICT[data_dim](pad_flag * (readout_kernel_size - 1) // 2))
+        self.readout = nn.Sequential(*readout)
+        self.final_trans = final_trans
+        
+        # send to device
+        self.to(device)
+        
+        if feature_channels == 0:
+            self.forward = self._forward_wo_features
+        else:
+            self.forward = self._forward_w_features
