@@ -83,7 +83,7 @@ def generate_occluded_training_data(
     n_datasets = len(ws_denoising_list)
     n_global_features = ws_denoising_list[0].n_global_features
     t_total = t_order + t_tandem
-    t_mid = (t_order + t_tandem - 1) // 2
+    t_mid = (t_total - 1) // 2
     trend_mean_feature_index = ws_denoising_list[0].cached_features.get_feature_index('trend_mean_0')
     detrended_std_feature_index = ws_denoising_list[0].cached_features.get_feature_index('detrended_std_0')
     

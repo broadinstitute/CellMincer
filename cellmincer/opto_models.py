@@ -3,6 +3,8 @@ import torch
 from torch import nn
 from typing import List, Tuple, Optional, Union, Dict
 
+from .opto_utils import crop_center
+
 
 def center_crop_1d(layer: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     _, _, layer_width = layer.size()
@@ -97,43 +99,44 @@ def activation_from_str(activation_str: str):
 
 ######################################################################
 
+EPS = 1e-6
+
 def initialize_model(
-        model_type: dict,
-        base_config: dict,
-        mod_config: dict = None,
+        model_config: dict,
         device: torch.device = torch.device('cuda'),
         dtype: torch.dtype = torch.float32) -> DenoisingModel:
-    config = dict(base_config, **mod_config) if mod_config else base_config
-    if model_type == 'spatial-unet-2d-temporal-denoiser':
-        return SpatialUnet2dTemporalDenoiser(model_type, config, device, dtype)
+    if model_config['type'] == 'spatial-unet-2d-temporal-denoiser':
+        return SpatialUnet2dTemporalDenoiser(model_config, device, dtype)
 
-class DenoisingModel:
+class DenoisingModel(nn.Module):
     def __init__(
             self,
             name: str,
-            t_order: int):
+            t_order: int,
+            device: torch.device,
+            dtype: torch.dtype):
         
         self.name = name
         self.t_order = t_order
-    
-    def denoise_full_movie(
-            self,
-            movie_txy: torch.Tensor,
-            features: torch.Tensor = None
-        ) -> torch.Tensor:
+        self.device = device
+        self.dtype = dtype
         
-        raise NotImplementedError
+    '''
+    Denoises the 'diff' movie segment in ws_denoising,
+    bounded by [t_begin, t_end) and windowed by (x0, y0, x_window, y_window).
     
-    def get_noise2self_loss(
-            batch_data,
-            ws_denoising_list: List[OptopatchDenoisingWorkspace],
-            loss_type: str,
-            norm_p: int,
-            enable_continuity_reg: bool,
-            reg_func: str,
-            continuity_reg_strength: float,
-            noise_threshold_to_std: float,
-            eps: float = 1e-6):
+    Returns a CPU tensor containing the denoised movie.
+    '''
+    def denoise_movie(
+            self,
+            ws_denoising: OptopatchDenoisingWorkspace,
+            t_begin: int = 0,
+            t_end: int = None,
+            x0: int = 0,
+            y0: int = 0,
+            x_window: int = None,
+            y_window: int = None
+        ) -> torch.Tensor:
         
         raise NotImplementedError
 
@@ -142,11 +145,20 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
     def __init__(
             self,
             config: dict,
-            device: torch.device = torch.device('cuda'),
-            dtype: torch.dtype = torch.float32):
+            device: torch.device,
+            dtype: torch.dtype):
+        
+        t_order = (1 +
+               (denoiser_config['temporal_denoiser_kernel_size'] - 1) *
+               (denoiser_config['temporal_denoiser_n_conv_layers']))
+        
+        assert t_order & 1 == 1
+        
         super(DenoisingModelA, self).__init__(
-            name=model_type,
-            t_order=config['t_order'])
+            name=config['type'],
+            t_order=t_order,
+            device=device,
+            dtype=dtype)
         
         self.use_global_features = config['n_global_features'] > 0
         
@@ -183,18 +195,147 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
     
     def forward(
             self,
-            x: torch.Tensor,
-            features: torch.Tensor = None
+            batch_data
         ) -> Tuple[torch.Tensor, torch.Tensor]:
         
-        assert not(features is None and self.use_global_features)
+        padded_sliced_diff_movie_ntxy = batch_data['padded_sliced_diff_movie_ntxy']
+        padded_global_features_nfxy = batch_data['padded_global_features_nfxy']
         
-        if self.use_global_features:
-            unet_out = self.spatial_unet(x, features)
-        else:
-            unet_out = self.spatial_unet(x)
+        n_batch, t_total = padded_sliced_diff_movie_ntxy.shape[:2]
+        n_global_features = padded_global_features_nfxy.shape[-3]
+        t_tandem = t_total - self.t_order
+        x_window = batch_data['x_window']
+        y_window = batch_data['y_window']
+        
+        # fetch and crop the dataset std (for regularization)
+        if enable_continuity_reg:
+            cropped_movie_t_std_nxy = crop_center(
+                padded_global_features_nfxy[:, batch_data['detrended_std_feature_index'], ...],
+                target_width=x_window,
+                target_height=y_window)
+
+        cropped_unet_endpoint_nxy_list = []
+        cropped_temporal_endpoint_nxy_list = []
+
+        # calculate processed features
+        unet_output_list = [
+            self.spatial_unet(
+                padded_sliced_diff_movie_ntxy[:, i_t:i_t+1, :, :],
+                padded_global_features_nfxy)
+            for i_t in range(t_total)]
+        unet_features_nctxy = torch.stack([output['features_ncxy'] for output in unet_output_list], dim=-3)
+        unet_readout_n1xy_list = [output['readout_ncxy'] for output in unet_output_list]
+        unet_features_width, unet_features_height = unet_features_nctxy.shape[-2:]
+        unet_cropped_global_features_nfxy = crop_center(
+            padded_global_features_nfxy,
+            target_width=unet_features_width,
+            target_height=unet_features_height)
+
+        # computes the endpoint tensors of the spatial unet and temporal denoiser
+        for i_t in range(t_tandem + 1):  # i_t denotes the index of the middle frames, starting from 0
+            # unet readout
+            cropped_unet_endpoint_nxy_list.append(crop_center(
+                unet_readout_n1xy_list[i_t + (self.t_order - 1) // 2][:, 0, :, :],
+                target_width=x_window,
+                target_height=y_window)
+            )
+
+            # get the temporal denoiser output
+            cropped_temporal_endpoint_nxy_list.append(crop_center(
+                self.temporal_denoiser(
+                    unet_features_nctxy[:, :, i_t:(i_t + self.t_order), :, :],
+                    unet_cropped_global_features_nfxy),
+                target_width=x_window,
+                target_height=y_window)
+            )
+
+        cropped_unet_endpoint_ntxy = torch.stack(cropped_unet_endpoint_nxy_list, dim=1)
+        cropped_temporal_endpoint_ntxy = torch.stack(cropped_temporal_endpoint_nxy_list, dim=1)
             
+        return {
+            'unet_endpoint_ntxy': cropped_unet_endpoint_ntxy,
+            'temporal_endpoint_ntxy': cropped_temporal_endpoint_ntxy
+        }
+    
+    def denoise_movie(
+            self,
+            ws_denoising: OptopatchDenoisingWorkspace,
+            t_begin: int = 0,
+            t_end: int = None,
+            x0: int = 0,
+            y0: int = 0,
+            x_window: int = None,
+            y_window: int = None
+        ) -> torch.Tensor:
         
+        # defaults bounds to full movie if unspecified
+        if t_end is None:
+            t_end = ws_denoising.n_frames
+        if x_window is None:
+            x_window = ws_denoising.width - x0
+        if y_window is None:
+            y_window = ws_denoising.height - y0
+        
+        assert t_end - t_begin >= self.t_order
+        assert 0 <= x0 <= x0 + x_window <= ws_denoising.width
+        assert 0 <= y0 <= y0 + y_window <= ws_denoising.height
+        
+        denoised_movie_txy = torch.empty(t_end - t_begin, x_window, y_window, device='cpu')
+        
+        # TODO: decide if a true deque structure offers significant improvement
+        unet_features_ncxy_list = []
+        
+        padded_global_features_1fxy = ws_denoising.get_feature_slice(
+            x0=x0,
+            y0=y0,
+            x_window=x_window,
+            y_window=y_window)
+        
+        with torch.no_grad():
+            for i_t in range(t_begin, t_begin + t_order - 1):
+                padded_sliced_movie_1txy = ws_denoising.get_movie_slice(
+                    t_begin_index=i_t,
+                    t_end_index=i_t + 1,
+                    x0=x0,
+                    y0=y0,
+                    x_window=x_window,
+                    y_window=y_window)['diff']
+
+                unet_output = spatial_unet_processor(padded_sliced_movie_1txy, padded_global_features_1fxy)
+                unet_features_ncxy_list.append(unet_output['features_ncxy'])
+
+            unet_features_width, unet_features_height = unet_features_ncxy_list[0].shape[-2:]
+            t_mid = (self.t_order - 1) // 2
+            for i_t in range(t_begin + t_mid, t_end - t_mid):
+                padded_sliced_movie_1txy = ws_denoising.get_movie_slice(
+                    t_begin_index=i_t + t_mid,
+                    t_end_index=i_t + t_mid + 1,
+                    x0=x0,
+                    y0=y0,
+                    x_window=x_window,
+                    y_window=y_window)['diff']
+
+                unet_output = spatial_unet_processor(padded_sliced_movie_1txy, padded_global_features_1fxy)
+                unet_features_ncxy_list.append(unet_output['features_ncxy'])
+
+                denoised_movie_txy[i_t - t_begin] = crop_center(
+                    temporal_denoiser(
+                        # features from t_order tandem frames
+                        torch.stack(unet_features_ncxy_list, dim=-3),
+                        # cropped global features
+                        crop_center(
+                            padded_global_features_1fxy,
+                            target_width=unet_features_width,
+                            target_height=unet_features_height)),
+                    target_width=x_window,
+                    target_height=y_window)
+
+                unet_features_ncxy_list.pop(0)
+        
+        denoised_movie_txy[:t_mid] = denoised_movie_txy[t_mid]
+        denoised_movie_txy[-t_mid:] = denoised_movie_txy[-t_mid - 1]
+        return denoised_movie_txy
+
             
 ######################################################################
 
