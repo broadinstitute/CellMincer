@@ -5,8 +5,8 @@ import torch
 import logging
 from typing import List, Tuple, Optional, Dict
 
-from .opto_utils import get_cosine_similarity_with_sequence_np
-from .opto_features import OptopatchGlobalFeatureContainer
+from cellmincer.opto_utils import get_cosine_similarity_with_sequence_np
+from cellmincer.opto_features import OptopatchGlobalFeatureContainer
 
 logger = logging.getLogger()
 

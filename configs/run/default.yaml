@@ -31,7 +31,7 @@ training:
     lr: 0.0001
     type: const
   n_batch_per_loop: 20
-  n_iters: 60000
+  n_iters: 180000
   n_loop: 1
   noise_threshold_to_std: 0.05
   norm_p: 2

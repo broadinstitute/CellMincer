@@ -4,7 +4,6 @@ import torch
 import logging
 from typing import List, Tuple, Optional, Union, Dict
 
-from .opto_models import DenoisingModel
 from .opto_ws import OptopatchBaseWorkspace, OptopatchDenoisingWorkspace
 from .opto_utils import pad_images_torch, crop_center, get_nn_spatio_temporal_mean
 
@@ -248,7 +247,7 @@ def get_poisson_gaussian_nll(
 def get_noise2self_loss(
         batch_data,
         ws_denoising_list: List[OptopatchDenoisingWorkspace],
-        denoising_model: DenoisingModel,
+        denoising_model,
         loss_type: str,
         norm_p: int,
         enable_continuity_reg: bool,
@@ -341,91 +340,3 @@ def get_noise2self_loss(
             _scale=continuity_reg_strength / ((t_tandem - 1) * total_pixels)) # TODO ask mehrtash abou this term
             
     return {'rec_loss': rec_loss, 'reg_loss': reg_loss}
-
-
-def generate_input_for_single_frame_denoising(
-        ws_denoising_list: List[OptopatchDenoisingWorkspace],
-        i_dataset: int,
-        i_t: int,
-        t_order: int,
-        x0: int,
-        y0: int,
-        x_window: int,
-        y_window: int,
-        device: torch.device = torch.device('cuda'),
-        dtype: torch.dtype = torch.float32):
-    """Prepares data for single-dataset single-frame denoising"""
-    
-    # slice the movies and copy to device
-    t_mid = (t_order - 1) // 2
-    padded_sliced_movie_txy = ws_denoising_list[i_dataset].get_movie_slice(
-        t_begin_index=i_t - t_mid,
-        t_end_index=i_t + t_mid + 1,
-        x0=x0,
-        y0=y0,
-        x_window=x_window,
-        y_window=y_window)['diff'][0, ...]
-    
-    padded_global_features_fxy = ws_denoising_list[i_dataset].get_feature_slice(
-        x0=x0,
-        y0=y0,
-        x_window=x_window,
-        y_window=y_window)[0, ...]
-    
-    return {
-        'padded_global_features_fxy': padded_global_features_fxy,
-        'padded_sliced_movie_txy': padded_sliced_movie_txy,
-        'x_window': x_window,
-        'y_window': y_window
-    }
-
-
-def denoise_single_frame(batch_data,
-                         ws_denoising_list: List[OptopatchDenoisingWorkspace],
-                         spatial_unet_processor: torch.nn.Module,
-                         temporal_denoiser: torch.nn.Module):
-    """Denoises a single frame from a single dataset"""
-    device = batch_data['padded_sliced_movie_txy'].device
-    dtype = batch_data['padded_sliced_movie_txy'].dtype
-    t_order, padded_width, padded_height = batch_data['padded_sliced_movie_txy'].shape
-    n_global_features = batch_data['padded_global_features_fxy'].shape[-3]
-
-    with torch.no_grad():
-        
-        # calculate processed features
-        unet_output_list = [
-            spatial_unet_processor(
-                batch_data['padded_sliced_movie_txy'][i_t, :, :][None, None, :, :],
-                batch_data['padded_global_features_fxy'][None, :, :, :])
-            for i_t in range(t_order)]
-        unet_features_ncxy_list = [output['features_ncxy'] for output in unet_output_list]
-        unet_readout_n1xy_list = [output['readout_ncxy'] for output in unet_output_list]
-        unet_features_width = unet_features_ncxy_list[0].shape[-2]
-        unet_features_height = unet_features_ncxy_list[0].shape[-1]
-        
-        # crop unet readout
-        cropped_unet_endpoint_xy = crop_center(
-            unet_readout_n1xy_list[(t_order - 1) // 2],
-            target_width=batch_data['x_window'],
-            target_height=batch_data['y_window'])[0, 0, :, :]
-    
-        # get the temporal denoiser output
-        cropped_temporal_endpoint_xy = crop_center(
-            temporal_denoiser(
-                # features from t_order tandem frames
-                torch.cat([
-                    unet_features_ncxy_list[i_t][:, :, None, :, :]
-                    for i_t in range(t_order)],
-                dim=-3),
-                # global features
-                crop_center(
-                    batch_data['padded_global_features_fxy'][None, :, :, :],
-                    target_width=unet_features_width,
-                    target_height=unet_features_height)),
-            target_width=batch_data['x_window'],
-            target_height=batch_data['y_window'])
-        
-        return {
-            'unet_endpoint_xy': cropped_unet_endpoint_xy,
-            'temporal_endpoint_xy': cropped_temporal_endpoint_xy
-        }

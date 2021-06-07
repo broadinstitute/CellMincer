@@ -29,8 +29,7 @@ from cellmincer.opto_denoise import \
     generate_occluded_training_data, \
     get_noise2self_loss
 
-from cellmincer.opto_models import \
-    DenoisingModel, \
+from models.__init__ import \
     initialize_model, \
     get_minimum_padding
 
@@ -51,7 +50,7 @@ def generate_lr_scheduler(optim, lr_params, n_epochs):
     return LambdaLR(optim, lr_lambda=func)
 
 def save_model_state(
-        denoising_model: DenoisingModel,
+        denoising_model,
         model_dir: str,
         index: int,
         save_adam_state: bool = True,
@@ -72,7 +71,7 @@ def save_model_state(
 
 def train(
         config: dict,
-        denoising_model: DenoisingModel,
+        denoising_model,
         ws_denoising_list: List[OptopatchDenoisingWorkspace]):
     
     model_dir = get_tagged_dir(
@@ -151,6 +150,16 @@ def train(
         
         if (i_iter + 1) % config['training']['log_every'] == 0:
             print(f'\titer {i_iter + 1}/{n_iters}')
+            
+        if (i_iter + 1) % config['training']['save_every'] == 0:
+            index = (i_iter + 1) // config['training']['save_every']
+            print(f'Saving checkpoint at index {index}')
+            save_model_state(
+                denoising_model=denoising_model,
+                model_dir=model_dir,
+                index=index,
+                save_adam_state=True,
+                save_rng_state=True)
     
     
     # save trained model
@@ -166,7 +175,7 @@ def train(
 
 def denoise(
         config: dict,
-        denoising_model: DenoisingModel,
+        denoising_model,
         ws_denoising_list: List[OptopatchDenoisingWorkspace]):
     denoise_dir = get_tagged_dir(
         name=config['model']['type'],
@@ -241,7 +250,7 @@ def load_datasets(config: dict) -> List[OptopatchDenoisingWorkspace]:
 def instance_model(
         config: dict,
         n_global_features: int,
-        model_dir: str) -> DenoisingModel:
+        model_dir: str):
     
     config['model']['n_global_features'] = n_global_features
     
