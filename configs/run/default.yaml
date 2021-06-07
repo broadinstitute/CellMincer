@@ -1,0 +1,47 @@
+datasets:
+- optosynth_first_wave__1__20__50
+device: cuda
+model:
+  spatial_unet_activation: relu
+  spatial_unet_batch_norm: false
+  spatial_unet_depth: 3
+  spatial_unet_kernel_size: 3
+  spatial_unet_n_conv_layers: 3
+  spatial_unet_out_channels_before_readout: 32
+  spatial_unet_padding: true
+  spatial_unet_readout_hidden_layer_channels_list: []
+  spatial_unet_readout_kernel_size: 1
+  spatial_unet_wf: 5
+  temporal_denoiser_activation: relu
+  temporal_denoiser_conv_channels: 32
+  temporal_denoiser_hidden_dense_layer_dims:
+  - 32
+  - 32
+  temporal_denoiser_kernel_size: 5
+  temporal_denoiser_n_conv_layers: 3
+  type: spatial-unet-2d-temporal-denoiser
+state_index: null
+tag: ''
+training:
+  continuity_reg_strength: 1.0
+  enable_continuity_reg: false
+  log_every: 100
+  loss_type: lp
+  lr_params:
+    lr: 0.0001
+    type: const
+  n_batch_per_loop: 20
+  n_iters: 60000
+  n_loop: 1
+  noise_threshold_to_std: 0.05
+  norm_p: 2
+  occlusion_prob: 0.05
+  occlusion_radius: 0
+  occlusion_strategy: random
+  reg_func: clamped_linear
+  save_every: 2000
+  seed: 1
+  t_tandem: 0
+  training_x_window: 96
+  training_y_window: 96
+  wd: 0.1

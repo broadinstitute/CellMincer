@@ -4,6 +4,7 @@ from torch import nn
 from typing import List, Tuple, Optional, Union, Dict
 
 from .opto_utils import crop_center
+from .opto_ws import OptopatchBaseWorkspace, OptopatchDenoisingWorkspace
 
 
 def center_crop_1d(layer: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -101,13 +102,6 @@ def activation_from_str(activation_str: str):
 
 EPS = 1e-6
 
-def initialize_model(
-        model_config: dict,
-        device: torch.device = torch.device('cuda'),
-        dtype: torch.dtype = torch.float32) -> DenoisingModel:
-    if model_config['type'] == 'spatial-unet-2d-temporal-denoiser':
-        return SpatialUnet2dTemporalDenoiser(model_config, device, dtype)
-
 class DenoisingModel(nn.Module):
     def __init__(
             self,
@@ -116,11 +110,15 @@ class DenoisingModel(nn.Module):
             device: torch.device,
             dtype: torch.dtype):
         
+        assert t_order & 1 == 1
+        
+        super(DenoisingModel, self).__init__()
+        
         self.name = name
         self.t_order = t_order
         self.device = device
         self.dtype = dtype
-        
+
     '''
     Denoises the 'diff' movie segment in ws_denoising,
     bounded by [t_begin, t_end) and windowed by (x0, y0, x_window, y_window).
@@ -140,6 +138,16 @@ class DenoisingModel(nn.Module):
         
         raise NotImplementedError
 
+    '''
+    Computes the minimum xy-padding on the input tensor that the model needs.
+    '''
+    @staticmethod
+    def get_minimum_padding(
+            config: dict,
+            training_x_window: int,
+            training_y_window: int) -> Tuple[int, int]:
+        raise NotImplementedError
+
 
 class SpatialUnet2dTemporalDenoiser(DenoisingModel):
     def __init__(
@@ -149,18 +157,16 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
             dtype: torch.dtype):
         
         t_order = (1 +
-               (denoiser_config['temporal_denoiser_kernel_size'] - 1) *
-               (denoiser_config['temporal_denoiser_n_conv_layers']))
+            (config['temporal_denoiser_kernel_size'] - 1) *
+            (config['temporal_denoiser_n_conv_layers']))
         
-        assert t_order & 1 == 1
-        
-        super(DenoisingModelA, self).__init__(
+        super(SpatialUnet2dTemporalDenoiser, self).__init__(
             name=config['type'],
             t_order=t_order,
             device=device,
             dtype=dtype)
         
-        self.use_global_features = config['n_global_features'] > 0
+        # TODO: allow for disabled global features
         
         self.spatial_unet = ConditionalUNet(
             in_channels=1,
@@ -183,7 +189,7 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
         
         self.temporal_denoiser = TemporalDenoiser(
             in_channels=config['spatial_unet_out_channels_before_readout'],
-            feature_channels=ws_denoising_list[0].n_global_features,
+            feature_channels=config['n_global_features'],
             t_order=self.t_order,
             kernel_size=config['temporal_denoiser_kernel_size'],
             hidden_conv_channels=config['temporal_denoiser_conv_channels'],
@@ -206,13 +212,6 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
         t_tandem = t_total - self.t_order
         x_window = batch_data['x_window']
         y_window = batch_data['y_window']
-        
-        # fetch and crop the dataset std (for regularization)
-        if enable_continuity_reg:
-            cropped_movie_t_std_nxy = crop_center(
-                padded_global_features_nfxy[:, batch_data['detrended_std_feature_index'], ...],
-                target_width=x_window,
-                target_height=y_window)
 
         cropped_unet_endpoint_nxy_list = []
         cropped_temporal_endpoint_nxy_list = []
@@ -224,39 +223,25 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
                 padded_global_features_nfxy)
             for i_t in range(t_total)]
         unet_features_nctxy = torch.stack([output['features_ncxy'] for output in unet_output_list], dim=-3)
-        unet_readout_n1xy_list = [output['readout_ncxy'] for output in unet_output_list]
         unet_features_width, unet_features_height = unet_features_nctxy.shape[-2:]
         unet_cropped_global_features_nfxy = crop_center(
             padded_global_features_nfxy,
             target_width=unet_features_width,
             target_height=unet_features_height)
 
-        # computes the endpoint tensors of the spatial unet and temporal denoiser
-        for i_t in range(t_tandem + 1):  # i_t denotes the index of the middle frames, starting from 0
-            # unet readout
-            cropped_unet_endpoint_nxy_list.append(crop_center(
-                unet_readout_n1xy_list[i_t + (self.t_order - 1) // 2][:, 0, :, :],
-                target_width=x_window,
-                target_height=y_window)
-            )
-
-            # get the temporal denoiser output
-            cropped_temporal_endpoint_nxy_list.append(crop_center(
+        # compute temporal-denoised convolutions for all t_order-length windows
+        cropped_temporal_endpoint_ntxy = torch.stack([
+            crop_center(
                 self.temporal_denoiser(
                     unet_features_nctxy[:, :, i_t:(i_t + self.t_order), :, :],
                     unet_cropped_global_features_nfxy),
                 target_width=x_window,
                 target_height=y_window)
-            )
-
-        cropped_unet_endpoint_ntxy = torch.stack(cropped_unet_endpoint_nxy_list, dim=1)
-        cropped_temporal_endpoint_ntxy = torch.stack(cropped_temporal_endpoint_nxy_list, dim=1)
+            for i_t in range(t_tandem + 1)], dim=1)
             
-        return {
-            'unet_endpoint_ntxy': cropped_unet_endpoint_ntxy,
-            'temporal_endpoint_ntxy': cropped_temporal_endpoint_ntxy
-        }
+        return cropped_temporal_endpoint_ntxy
     
+    # TODO modify to use out-of-time-window frames for denoising if they exist
     def denoise_movie(
             self,
             ws_denoising: OptopatchDenoisingWorkspace,
@@ -292,7 +277,7 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
             y_window=y_window)
         
         with torch.no_grad():
-            for i_t in range(t_begin, t_begin + t_order - 1):
+            for i_t in range(t_begin, t_begin + self.t_order - 1):
                 padded_sliced_movie_1txy = ws_denoising.get_movie_slice(
                     t_begin_index=i_t,
                     t_end_index=i_t + 1,
@@ -301,7 +286,7 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
                     x_window=x_window,
                     y_window=y_window)['diff']
 
-                unet_output = spatial_unet_processor(padded_sliced_movie_1txy, padded_global_features_1fxy)
+                unet_output = self.spatial_unet(padded_sliced_movie_1txy, padded_global_features_1fxy)
                 unet_features_ncxy_list.append(unet_output['features_ncxy'])
 
             unet_features_width, unet_features_height = unet_features_ncxy_list[0].shape[-2:]
@@ -315,11 +300,11 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
                     x_window=x_window,
                     y_window=y_window)['diff']
 
-                unet_output = spatial_unet_processor(padded_sliced_movie_1txy, padded_global_features_1fxy)
+                unet_output = self.spatial_unet(padded_sliced_movie_1txy, padded_global_features_1fxy)
                 unet_features_ncxy_list.append(unet_output['features_ncxy'])
 
                 denoised_movie_txy[i_t - t_begin] = crop_center(
-                    temporal_denoiser(
+                    self.temporal_denoiser(
                         # features from t_order tandem frames
                         torch.stack(unet_features_ncxy_list, dim=-3),
                         # cropped global features
@@ -335,8 +320,95 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
         denoised_movie_txy[:t_mid] = denoised_movie_txy[t_mid]
         denoised_movie_txy[-t_mid:] = denoised_movie_txy[-t_mid - 1]
         return denoised_movie_txy
+    
+    @staticmethod
+    def get_minimum_padding(
+            config: dict,
+            training_x_window: int,
+            training_y_window: int) -> Tuple[int, int]:
+        def _get_unet_input_size(
+                output_min_size: int,
+                kernel_size: int,
+                n_conv_layers: int,
+                depth: int):
+            """Smallest input size for output size >= `output_min_size`.
 
-            
+            .. note:
+                The calculated input sizes guarantee that all of the layers have even dimensions.
+                This is important to prevent aliasing in downsampling (pooling) operations.
+
+            """
+            delta = n_conv_layers * (kernel_size - 1)
+            pad = delta * sum([2 ** i for i in range(depth)])
+            ds = 2 ** depth
+            res = (output_min_size + pad) % ds
+            bottom_size = (output_min_size + pad) // ds + res
+            input_size = bottom_size
+            for i in range(depth):
+                input_size = 2 * (input_size + delta)
+            input_size += delta
+            return input_size
+        
+        if not config['spatial_unet_padding']:
+            padded_x_window = _get_unet_input_size(
+                output_min_size=(
+                    training_x_window
+                    + (config['spatial_unet_readout_kernel_size'] - 1)
+                        * len(config['spatial_unet_readout_hidden_layer_channels_list']) + 1),
+                kernel_size=config['spatial_unet_kernel_size'],
+                n_conv_layers=config['spatial_unet_n_conv_layers'],
+                depth=config['spatial_unet_depth'])
+            padded_y_window = _get_unet_input_size(
+                output_min_size=(
+                    training_y_window
+                    + (config['spatial_unet_readout_kernel_size'] - 1)
+                        * len(config['spatial_unet_readout_hidden_layer_channels_list']) + 1),
+                kernel_size=config['spatial_unet_kernel_size'],
+                n_conv_layers=config['spatial_unet_n_conv_layers'],
+                depth=config['spatial_unet_depth'])
+
+        else:
+            padded_x_window = _get_unet_input_size(
+                output_min_size=training_x_window,
+                kernel_size=1,
+                n_conv_layers=config['spatial_unet_n_conv_layers'],
+                depth=config['spatial_unet_depth'])
+            padded_y_window = _get_unet_input_size(
+                output_min_size=training_y_window,
+                kernel_size=1,
+                n_conv_layers=config['spatial_unet_n_conv_layers'],
+                depth=config['spatial_unet_depth'])
+
+        x_padding = (padded_x_window - training_x_window) // 2
+        y_padding = (padded_y_window - training_y_window) // 2
+
+        return x_padding, y_padding
+
+
+def initialize_model(
+        model_config: dict,
+        model_state_path: str = None,
+        device: torch.device = torch.device('cuda'),
+        dtype: torch.dtype = torch.float32) -> DenoisingModel:
+    # TODO: make this a dictionary lookup
+    if model_config['type'] == 'spatial-unet-2d-temporal-denoiser':
+        denoising_model = SpatialUnet2dTemporalDenoiser(model_config, device, dtype)
+    if model_state_path is not None:
+        denoising_model.load_state_dict(torch.load(model_state_path))
+        
+    return denoising_model
+    
+def get_minimum_padding(
+            model_config: dict,
+            training_x_window: int,
+            training_y_window: int) -> Tuple[int, int]:
+    if model_config['type'] == 'spatial-unet-2d-temporal-denoiser':
+        return SpatialUnet2dTemporalDenoiser.get_minimum_padding(
+            model_config,
+            training_x_window,
+            training_y_window)
+    
+
 ######################################################################
 
 class UNetConvBlock(nn.Module):
@@ -567,7 +639,7 @@ class ConditionalUNet(nn.Module):
     def _forward_wo_features(self, x: torch.Tensor) \
             -> Tuple[torch.Tensor, torch.Tensor]:
         block_list = []
-        for i, down_op in enumerate(self.down_path):            
+        for i, down_op in enumerate(self.down_path):
             x = down_op(x)
             if i != len(self.down_path) - 1:
                 block_list.append(x)

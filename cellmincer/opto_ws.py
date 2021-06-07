@@ -38,7 +38,7 @@ class OptopatchBaseWorkspace:
             n_frames: int,
             width: int,
             height: int,
-            order: str = 'tyx',
+            order: str = 'txy',
             dtype = np.float32,
             neighbor_dx_dy_list: List[Tuple[int, int]] = DEFAULT_NEIGHBOR_DX_DY_LIST):
         # load the movie
@@ -55,14 +55,13 @@ class OptopatchBaseWorkspace:
     @staticmethod
     def from_npy(
             movie_npy_path: str,
-            permutation: Optional[Tuple[int]] = None,
+            order: str = 'txy',
             dtype = np.float32,
             neighbor_dx_dy_list: List[Tuple[int, int]] = DEFAULT_NEIGHBOR_DX_DY_LIST):
         # load the movie
         log_info(f"Loading movie from {movie_npy_path} ...")
-        movie_txy = np.load(movie_npy_path).astype(dtype)
-        if permutation is not None:
-            movie_txy = movie_txy.transpose(*permutation)
+        movie_nnn = np.load(movie_npy_path).astype(dtype)
+        movie_txy = movie_nnn.transpose(tuple(map(order.find, 'txy')))
         return OptopatchBaseWorkspace(
             movie_txy=movie_txy,
             dtype=dtype,
@@ -71,7 +70,7 @@ class OptopatchBaseWorkspace:
     @staticmethod
     def from_npz(
             movie_npz_path: str,
-            order: str = 'tyx',
+            order: str = 'txy',
             key = 'arr_0',
             dtype = np.float32,
             neighbor_dx_dy_list: List[Tuple[int, int]] = DEFAULT_NEIGHBOR_DX_DY_LIST):
@@ -79,10 +78,9 @@ class OptopatchBaseWorkspace:
         log_info(f"Loading movie from {movie_npz_path} ...")
         
         npz_file = np.load(movie_npz_path)
-        movie_txy = npz_file[key].astype(dtype)
+        movie_nnn = npz_file[key].astype(dtype)
         npz_file.close()
-        
-        movie_txy = movie_txy.transpose(tuple(map(order.find, 'txy')))
+        movie_txy = movie_nnn.transpose(tuple(map(order.find, 'txy')))
         return OptopatchBaseWorkspace(
             movie_txy=movie_txy,
             dtype=dtype,
@@ -324,14 +322,14 @@ class OptopatchDenoisingWorkspace:
     
     def get_modeled_variance(
             self,
-            scaled_bg_movie_ntxy: torch.Tensor,
-            scaled_diff_movie_ntxy: torch.Tensor) -> torch.Tensor:
+            scaled_bg_movie_txy: torch.Tensor,
+            scaled_diff_movie_txy: torch.Tensor) -> torch.Tensor:
         if self.noise_params is None:
             raise Exception('Cannot model variance with undefined noise parameters')
         
         s = self.cached_features.norm_scale
         var_ntxy = torch.clamp(
-            (self.noise_params['alpha_median'] * s * (scaled_bg_movie_ntxy + scaled_diff_movie_ntxy)
+            (self.noise_params['alpha_median'] * s * (scaled_bg_movie_txy + scaled_diff_movie_txy)
              + self.noise_params['beta_median']),
             min=self.noise_params['global_min_variance']) / (s ** 2)
         return var_ntxy

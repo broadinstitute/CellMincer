@@ -1,5 +1,7 @@
 import os
 import yaml
+import json
+import argparse
 
 import matplotlib.pylab as plt
 import numpy as np
@@ -8,14 +10,16 @@ import logging
 
 from cellmincer.opto_ws import OptopatchBaseWorkspace
 from cellmincer.opto_features import OptopatchGlobalFeatureExtractor
+from cellmincer.opto_utils import get_tagged_dir
 
 from scipy.signal import stft, istft
 from sklearn.linear_model import LinearRegression
 
 from abc import abstractmethod
-from typing import Tuple
+from typing import List, Tuple
 
 dtype = torch.float32
+root_data_dir = '/home/jupyter/bw-data/cellmincer/data'
 
 
 def preprocess(config_file):
@@ -25,117 +29,273 @@ def preprocess(config_file):
         except yaml.YAMLError as exc:
             print(exc)
     
-    device = torch.device(config['device'])
-    
     # load datasets
-    dataset_names = config['datasets']['dataset_names']
-    dataset_movie_paths = config['datasets']['dataset_movie_paths']
-    dataset_params_paths = config['datasets']['dataset_params_paths']
+    datasets = config['datasets']
     
-    assert len(dataset_names) == len(dataset_movie_paths) == len(dataset_params_paths)
-    assert all([os.path.exists(dataset_path) for dataset_path in dataset_paths])
+    assert all([os.path.exists(dataset['movie']) for dataset in datasets])
     
-    n_datasets = len(dataset_names)
+    print('Creating data directories...')
+    for i_dataset, dataset in enumerate(datasets):
+        # appends config tag to data directory if tag exists
+        data_dir = get_tagged_dir(
+            name=dataset['name'],
+            config_tag=config['tag'],
+            root_dir=root_data_dir)
+        if not os.path.exists(data_dir):
+            os.mkdir(data_dir)
+        print(f'\t({i_dataset + 1}/{len(datasets)}) {data_dir}')
     
-    for i_dataset in range(n_datasets):
-        params_path = os.path.join(dataset_params_paths[i_dataset])
-
-        with open(params_path, 'r') as stream:
-            try:
-                params_config = yaml.safe_load(stream)
-            except yaml.YAMLError as exc:
-                print(exc)
+    print('Preprocessing datasets...')
+    for i_dataset, dataset in enumerate(datasets):
+        print(f'{i_dataset + 1} -- {dataset["name"]}')
         
-        ws_base = OptopatchBaseWorkspace.from_npz(dataset_movie_paths[i_dataset])
-        
+        # TODO: clarify xy-axis-transposition
+        if dataset['movie'].endswith('.npz'):
+            ws_base = OptopatchBaseWorkspace.from_npz(dataset['movie'], order=dataset['order'])
+        elif dataset['movie'].endswith('.npy'):
+            ws_base = OptopatchBaseWorkspace.from_npy(dataset['movie'], order=dataset['order'])
         
         # dejitter movie
         # estimate baseline (CCD dc offset)
         # this is a heuristic -- ideally, one needs to be given this information!
-        baseline = np.min(ws_base.movie_txy[config['dejitter']['ignore_first_n_frames']:, :, :])
-        print(f"Baseline CCD dc offset was estimated to be: {baseline:.3f}")
+        movie_txy = dejitter(
+            movie_txy=ws_base.movie_txy,
+            dejitter_config=config['dejitter'],
+            ds_params=dataset['params'])
 
-        log_movie_txy = np.log(np.maximum(ws_base.movie_txy - baseline, 1.))
-        log_movie_mean_t = log_movie_txy.mean((-1, -2))
-
-        if config['dejitter']['detrending_method'] in {'median', 'mean'}:
-
-            log_movie_mean_trend_t = get_trend(
-                log_movie_mean_t,
-                config['dejitter']['detrending_order'],
-                config['dejitter']['detrending_method'])
-
-        elif config['dejitter']['detrending_method'] == 'stft':
-
-            stft_f, stft_t, stft_Zxx = stft(
-                log_movie_mean_t,
-                boundary='constant',
-                fs=config['dejitter']['sampling_rate'],
-                nperseg=config['dejitter']['stft_nperseg'],
-                noverlap=config['dejitter']['stft_noverlap'])
-
-            jitter_freq_filter = 1. / (1 + np.exp(
-                config['dejitter']['stft_lp_slope'] * (stft_f - config['dejitter']['stft_lp_cutoff'])))
-
-            filtered_Zxx = stft_Zxx * jitter_freq_filter[:, None]
-            _, filtered_log_movie_mean_t = istft(
-                filtered_Zxx,
-                fs=config['dejitter']['sampling_rate'],
-                nperseg=config['dejitter']['stft_nperseg'],
-                noverlap=config['dejitter']['stft_noverlap'])
-
-            log_movie_mean_trend_t = filtered_log_movie_mean_t[:log_movie_mean_t.size]
-
-        else:
-
-            raise ValueError()
-
-        log_jitter_factor_t = log_movie_mean_t - log_movie_mean_trend_t
-        dejittered_movie_txy = np.exp(log_movie_txy - log_jitter_factor_t[:, None, None]) + baseline
-        
-        
         # estimate noise from dejittered movie
-        movie_txy = dejittered_movie_txy
+        noise_model_params = estimate_noise(
+            movie_txy=movie_txy,
+            noise_estimation_config=config['noise_estimation'],
+            trim_config=config['trim'],
+            ds_params=dataset['params'])
+        
+        # fit segment trends
+        trimmed_segments_txy_list, mu_segments_txy_list = detrend(
+            movie_txy=movie_txy,
+            noise_model_params=noise_model_params,
+            detrend_config=config['detrend'],
+            trim_config=config['trim'],
+            bfgs_kwargs=config['bfgs_kwargs'],
+            ds_params=dataset['params'],
+            device=config['device'])
 
-        slope_list = []
-        intercept_list = []
+        # save results to data directory
+        data_dir = get_tagged_dir(
+            name=dataset['name'],
+            config_tag=config['tag'],
+            root_dir=root_data_dir)
+        
+        trend_sub_movie_txy = np.concatenate([
+            seg_txy - mu_txy
+            for seg_txy, mu_txy in zip(trimmed_segments_txy_list, mu_segments_txy_list)],
+            axis=0).astype(np.float32)
+        trend_movie_txy = np.concatenate(mu_segments_txy_list, axis=0).astype(np.float32)
+        
+        output_file = os.path.join(data_dir, 'trend_subtracted.npy')
+        np.save(output_file, trend_sub_movie_txy)
+
+        output_file = os.path.join(data_dir, 'trend.npy')
+        np.save(output_file, trend_movie_txy)
+        
+        output_file = os.path.join(data_dir, 'noise_params.json')
+        with open(output_file, 'w') as f:
+            json.dump(noise_model_params, f)
+    
+    print('Preprocessing done.')
+
+    
+def dejitter(
+        movie_txy: np.ndarray,
+        dejitter_config: dict,
+        ds_params: dict) -> np.ndarray:
+    
+    baseline = np.min(movie_txy[dejitter_config['ignore_first_n_frames']:, :, :])
+    print(f"\tbaseline CCD dc offset estimate: {baseline:.3f}")
+
+    log_movie_txy = np.log(np.maximum(movie_txy - baseline, 1.))
+    log_movie_mean_t = log_movie_txy.mean((-1, -2))
+
+    if dejitter_config['detrending_method'] in {'median', 'mean'}:
+
+        log_movie_mean_trend_t = get_trend(
+            log_movie_mean_t,
+            dejitter_config['detrending_order'],
+            dejitter_config['detrending_method'])
+
+    elif dejitter_config['detrending_method'] == 'stft':
+
+        stft_f, stft_t, stft_Zxx = stft(
+            log_movie_mean_t,
+            boundary='constant',
+            fs=ds_params['sampling_rate'],
+            nperseg=dejitter_config['stft_nperseg'],
+            noverlap=dejitter_config['stft_noverlap'])
+
+        jitter_freq_filter = 1. / (1 + np.exp(
+            dejitter_config['stft_lp_slope'] * (stft_f - dejitter_config['stft_lp_cutoff'])))
+
+        filtered_Zxx = stft_Zxx * jitter_freq_filter[:, None]
+        _, filtered_log_movie_mean_t = istft(
+            filtered_Zxx,
+            fs=ds_params['sampling_rate'],
+            nperseg=dejitter_config['stft_nperseg'],
+            noverlap=dejitter_config['stft_noverlap'])
+
+        log_movie_mean_trend_t = filtered_log_movie_mean_t[:log_movie_mean_t.size]
+
+    else:
+
+        raise ValueError()
+
+    log_jitter_factor_t = log_movie_mean_t - log_movie_mean_trend_t
+    dejittered_movie_txy = np.exp(log_movie_txy - log_jitter_factor_t[:, None, None]) + baseline
+    
+    return dejittered_movie_txy
+
+
+def estimate_noise(
+        movie_txy: np.ndarray,
+        noise_estimation_config: dict,
+        trim_config: dict,
+        ds_params: dict) -> dict:
+    
+    slope_list = []
+    intercept_list = []
+
+    if noise_estimation_config['plot_example']:
+        fig = plt.figure()
+        ax = plt.gca()
+        ax.set_xlabel('mean')
+        ax.set_ylabel('variance')
+
+    for i_bootstrap in range(noise_estimation_config['n_bootstrap']):
+
+        # choose a random segment
+        i_segment = np.random.randint(ds_params['n_segments'])
+        t, trimmed_seg_txy = get_flanking_segments(movie_txy, i_segment, trim_config, ds_params)
+
+        # choose a random time
+        i_t = np.random.randint(0, high=len(t) - noise_estimation_config['stationarity_window'])
+
+        # calculate empirical mean and variance, assuming signal stationarity
+        mu_empirical = np.mean(trimmed_seg_txy[
+            i_t:(i_t + noise_estimation_config['stationarity_window']), ...], axis=0).flatten()
+        var_empirical = np.var(trimmed_seg_txy[
+            i_t:(i_t + noise_estimation_config['stationarity_window']), ...], axis=0, ddof=1).flatten()
+
+        # perform linear regression
+        reg = LinearRegression().fit(mu_empirical[:, None], var_empirical[:, None])
+        slope_list.append(reg.coef_.item())
+        intercept_list.append(reg.intercept_.item())
 
         if noise_estimation_config['plot_example']:
+            fit_var = reg.predict(mu_empirical[:, None])
+            ax.scatter(
+                mu_empirical[::noise_estimation_config['plot_subsample']],
+                var_empirical[::noise_estimation_config['plot_subsample']],
+                s=1,
+                alpha=0.1,
+                color='black')
+            ax.plot(mu_empirical, fit_var, color='red', alpha=0.1)
+    
+    alpha_median, alpha_std = np.median(slope_list), np.std(slope_list)
+    beta_median, beta_std = np.median(intercept_list), np.std(intercept_list)
+    
+    # check that all variance is positive
+    global_min_variance = np.inf
+    for i_segment in range(ds_params['n_segments']):
+        _, seg_txy = get_trimmed_segment(movie_txy, i_segment, trim_config, ds_params)
+        min_obs_value_in_segment = np.min(seg_txy)
+        min_variance = alpha_median * min_obs_value_in_segment + beta_median
+        global_min_variance = min(global_min_variance, min_variance)
+        print(f'\tmin variance in segment {i_segment}: {min_variance:.3f}')
+        # TODO: a more controlled error handling
+        assert min_variance > 0, f'{min_variance} < 0'
+    
+    return {
+        'alpha_median': alpha_median,
+        'alpha_std': alpha_std,
+        'beta_median': beta_median,
+        'beta_std': beta_std,
+        'global_min_variance': global_min_variance
+    }
+
+
+def detrend(
+        movie_txy: np.ndarray,
+        noise_model_params: dict,
+        detrend_config: dict,
+        trim_config: dict,
+        bfgs_kwargs: dict,
+        ds_params: dict,
+        device: torch.device = torch.device('cuda')) -> Tuple[List, List]:
+    # trimmed segments of the movie
+    trimmed_segments_txy_list = []
+
+    # background activity fits
+    mu_segments_txy_list = []
+    
+    for i_segment in range(ds_params['n_segments']):
+        # get segment for fitting
+        t_fit, fit_seg_txy = get_flanking_segments(movie_txy, i_segment, trim_config, ds_params)
+        t_fit_torch = torch.tensor(t_fit, device=device, dtype=dtype)
+        fit_seg_txy_torch = torch.tensor(fit_seg_txy, device=device, dtype=dtype)
+        width, height = fit_seg_txy_torch.shape[1:]
+
+        if detrend_config['trend_model'] == 'polynomial':
+            trend_model = PolynomialIntensityTrendModel(
+                t_fit_torch=t_fit_torch,
+                fit_seg_txy_torch=fit_seg_txy_torch,
+                poly_order=detrend_config['poly_order'],
+                device=device,
+                dtype=dtype)
+        elif detrend_config['trend_model'] == 'exponential':
+            trend_model = ExponentialDecayIntensityTrendModel(
+                t_fit=t_fit,
+                fit_seg_txy=fit_seg_txy,
+                init_unc_decay_rate=detrend_config['init_unc_decay_rate'],
+                device=device,
+                dtype=dtype)
+        else:
+            raise ValueError()
+
+        # fit 
+        optim = torch.optim.LBFGS(trend_model.parameters(), **bfgs_kwargs)
+
+        def closure():
+            optim.zero_grad()
+            mu_txy = trend_model.get_baseline_txy(t_fit_torch)
+            var_txy = torch.clamp(
+                noise_model_params['alpha_median'] * mu_txy + noise_model_params['beta_median'],
+                min=noise_model_params['global_min_variance'])
+            loss_txy = 0.5 * (fit_seg_txy_torch - mu_txy).pow(2) / var_txy + 0.5 * var_txy.log()
+            loss = loss_txy.sum()
+            loss.backward()
+            return loss
+
+        for i_iter in range(detrend_config['max_iters_per_segment']):
+            loss = optim.step(closure).item()
+        
+        print(f'\tdetrended segment {i_segment + 1}/{ds_params["n_segments"]} | loss = {loss / (width * height * len(t_fit)):.6f}')
+
+        t_trimmed, trimmed_seg_txy = get_trimmed_segment(movie_txy, i_segment, trim_config, ds_params)
+        t_trimmed_torch = torch.tensor(t_trimmed, device=device, dtype=dtype)
+        mu_txy = trend_model.get_baseline_txy(t_trimmed_torch).detach().cpu().numpy()
+
+        if detrend_config['plot_segments']:
             fig = plt.figure()
             ax = plt.gca()
-            ax.set_xlabel('mean')
-            ax.set_ylabel('variance')
+            ax.scatter(t_trimmed, np.mean(trimmed_seg_txy, axis=(-1, -2)), s=1)
+            ax.scatter(t_trimmed, np.mean(mu_txy, axis=(-1, -2)), s=1)
+            ax.set_title(f'segment {i_segment + 1}')
 
-        for i_bootstrap in range(noise_estimation_config['n_bootstrap']):
-
-            # choose a random segment
-            i_segment = np.random.randint(trim_config['n_segments'])
-            t, trimmed_seg_txy = get_flanking_segments(movie_txy, i_segment, trim_config)
-
-            # choose a random time
-            i_t = np.random.randint(0, high=len(t) - noise_estimation_config['stationarity_window'])
-
-            # calculate empirical mean and variance, assuming signal stationarity
-            mu_empirical = np.mean(trimmed_seg_txy[
-                i_t:(i_t + noise_estimation_config['stationarity_window']), ...], axis=0).flatten()
-            var_empirical = np.var(trimmed_seg_txy[
-                i_t:(i_t + noise_estimation_config['stationarity_window']), ...], axis=0, ddof=1).flatten()
-
-            # perform linear regression
-            reg = LinearRegression().fit(mu_empirical[:, None], var_empirical[:, None])
-            slope_list.append(reg.coef_.item())
-            intercept_list.append(reg.intercept_.item())
-
-            if noise_estimation_config['plot_example']:
-                fit_var = reg.predict(mu_empirical[:, None])
-                ax.scatter(
-                    mu_empirical[::noise_estimation_config['plot_subsample']],
-                    var_empirical[::noise_estimation_config['plot_subsample']],
-                    s=1,
-                    alpha=0.1,
-                    color='black')
-                ax.plot(mu_empirical, fit_var, color='red', alpha=0.1)
+        # store
+        trimmed_segments_txy_list.append(trimmed_seg_txy)
+        mu_segments_txy_list.append(mu_txy)
         
+    return trimmed_segments_txy_list, mu_segments_txy_list
+
 
 def get_trend(
         series_t: np.ndarray,
@@ -165,12 +325,13 @@ def get_trimmed_segment(
         movie_txy: np.ndarray,
         i_stim: int,
         trim_config: dict,
-        tranform_time: bool = True) -> np.ndarray:
-    i_t_begin = trim_config['n_frames_total'] * i_stim + trim_config['trim_left']
-    i_t_end = trim_config['n_frames_total'] * (i_stim + 1) - trim_config['trim_right']
+        ds_params: dict,
+        tranform_time: bool = True,) -> np.ndarray:
+    i_t_begin = ds_params['n_frames_per_segment'] * i_stim + trim_config['trim_left']
+    i_t_end = ds_params['n_frames_per_segment'] * (i_stim + 1) - trim_config['trim_right']
     i_t_list = [i_t for i_t in range(i_t_begin, i_t_end)]
     if tranform_time:
-        t = np.asarray([i_t - i_t_begin for i_t in i_t_list]) / trim_config['sampling_rate']
+        t = np.asarray([i_t - i_t_begin for i_t in i_t_list]) / ds_params['sampling_rate']
     else:
         t = i_t_list
     return t, movie_txy[i_t_begin:i_t_end, ...]
@@ -178,14 +339,15 @@ def get_trimmed_segment(
 def get_flanking_segments(
         movie_txy: np.ndarray,
         i_stim: int,
-        trim_config: dict) -> Tuple[np.ndarray, np.ndarray]:
+        trim_config: dict,
+        ds_params: dict) -> Tuple[np.ndarray, np.ndarray]:
     t_begin_left = (
-        trim_config['n_frames_total'] * i_stim
+        ds_params['n_frames_per_segment'] * i_stim
         + trim_config['trim_left'])
     t_end_left = t_begin_left + trim_config['n_frames_fit_left']
     
     t_begin_right = (
-        trim_config['n_frames_total'] * (i_stim + 1)
+        ds_params['n_frames_per_segment'] * (i_stim + 1)
         - trim_config['trim_right']
         - trim_config['n_frames_fit_right'])
     t_end_right = t_begin_right + trim_config['n_frames_fit_right']
@@ -194,7 +356,7 @@ def get_flanking_segments(
         [i_t for i_t in range(t_begin_left, t_end_left)]
         + [i_t for i_t in range(t_begin_right, t_end_right)])
     
-    t = np.asarray([i_t - t_begin_left for i_t in i_t_list]) / trim_config['sampling_rate']
+    t = np.asarray([i_t - t_begin_left for i_t in i_t_list]) / ds_params['sampling_rate']
     
     return t, movie_txy[i_t_list, ...]
 
@@ -277,3 +439,11 @@ class PolynomialIntensityTrendModel(IntensityTrendModel):
         pref_n = n * (n - 1)
         dd_tn = pref_n[2:] * t[:, None].pow(self.n_series[:-2])
         return torch.einsum('tn,nxy->txy', dd_tn, self.an_xy[2:])
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Perform data preprocessing.')
+    parser.add_argument('configfile', help='path to the configfile')
+
+    args = parser.parse_args()
+    preprocess(args.configfile)

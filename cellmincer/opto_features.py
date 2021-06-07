@@ -263,7 +263,7 @@ class OptopatchGlobalFeatureExtractor:
     def __init__(
             self,
             ws_base: 'OptopatchBaseWorkspace',
-            logger: logging.Logger,
+            logger: logging.Logger = None,
             select_active_t_range: bool = True,
             max_depth: int = 3,
             detrending_order: int = 10,
@@ -295,7 +295,8 @@ class OptopatchGlobalFeatureExtractor:
         self._populate_features()
         
     def log_info(self, msg: str):
-        logger.warning(msg)
+        if logger is not None:
+            logger.warning(msg)
         
     @staticmethod
     def determine_active_t_range(
@@ -373,7 +374,8 @@ class OptopatchGlobalFeatureExtractor:
 
         for depth in range(self.max_depth + 1):
             if depth > 0:
-                self.log_info(f'Downsampling to depth {depth}...')
+                # TODO commented out some logs
+#                 self.log_info(f'Downsampling to depth {depth}...')
                 current_padded_movie = get_spatially_downsampled(
                     padded_movie=prev_padded_movie,
                     mode=self.downsampling_mode)
@@ -428,7 +430,7 @@ class OptopatchGlobalFeatureExtractor:
 
             for (dt, dx, dy) in corr_displacement_list:
 
-                self.log_info(f'Calculating x-corr ({dt}, {dx}, {dy}) at depth {depth} for detrended movie...')
+#                 self.log_info(f'Calculating x-corr ({dt}, {dx}, {dy}) at depth {depth} for detrended movie...')
                 current_cross_corr_xy = calculate_cross(
                     padded_movie=current_padded_movie,
                     trend_movie=current_trend_movie,
@@ -444,7 +446,7 @@ class OptopatchGlobalFeatureExtractor:
                 self.features.feature_depth_list.append(depth)
                 self.features.feature_name_list.append(f'detrended_corr_{depth}_{dt}_{dx}_{dy}')
 
-                self.log_info(f'Calculating x-corr ({dt}, {dx}, {dy}) at depth {depth} for the trend...')
+#                 self.log_info(f'Calculating x-corr ({dt}, {dx}, {dy}) at depth {depth} for the trend...')
                 current_cross_corr_xy = calculate_cross(
                     padded_movie=current_trend_movie,
                     trend_movie=None,

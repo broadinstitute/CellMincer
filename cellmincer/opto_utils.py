@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import torch
 from typing import Optional, Union, List, Tuple
@@ -80,7 +82,9 @@ def pad_images_torch(images_ncxy: torch.Tensor,
            margin_height:(source_height + margin_height)] = images_ncxy
     return output
 
-
+'''
+Crops the last two dimensions to the specified center window.
+'''
 def crop_center(input_ncxy: Union[torch.Tensor, np.ndarray],
                 target_width: int,
                 target_height: int) -> Union[torch.Tensor, np.ndarray]:
@@ -243,3 +247,11 @@ def rolling_circle_filter_torch(
         y_bg[:, i_x] = y_center[batch_ravel, indices] + radius_y
     
     return y_bg.reshape(batch_shape + (n_points,))
+
+
+def get_tagged_dir(
+        name: str,
+        config_tag: str,
+        root_dir: str):
+    return os.path.join(root_dir, '__'.join([name, config_tag]) if config_tag else name)
+

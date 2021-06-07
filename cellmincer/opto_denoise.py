@@ -4,6 +4,7 @@ import torch
 import logging
 from typing import List, Tuple, Optional, Union, Dict
 
+from .opto_models import DenoisingModel
 from .opto_ws import OptopatchBaseWorkspace, OptopatchDenoisingWorkspace
 from .opto_utils import pad_images_torch, crop_center, get_nn_spatio_temporal_mean
 
@@ -213,39 +214,41 @@ def generate_occluded_training_data(
 
 
 def get_total_variation(
-        curr_frame_nxy: torch.Tensor,
-        prev_frame_nxy: torch.Tensor,
+        dt_frame_ntxy: torch.Tensor,
         noise_std_nxy: torch.Tensor,
         noise_threshold_to_std: float,
         reg_func: str,
-        eps: float = 1e-6):    
+        eps: float = 1e-6):
+    
+    noise_std_ntxy = noise_std_nxy.unsqueeze(1)
     if reg_func == 'clamped_linear':
         return torch.clamp(
-            (curr_frame_nxy - prev_frame_nxy) / (eps + noise_std_nxy),
+            dt_frame_ntxy / (eps + noise_std_ntxy),
             min=0.,
             max=noise_threshold_to_std)
     elif reg_func == 'tanh':
         eta = eps + noise_threshold_to_std
         return eta * torch.tanh(
-            (curr_frame_nxy - prev_frame_nxy) / ((eps + noise_std_nxy) * eta))
+            dt_frame_ntxy / ((eps + noise_std_ntxy) * eta))
     else:
         raise ValueError(
             f"Unknown reg_func value ({reg_func}); valid options are: 'clamped_linear', 'tanh'")        
         
 
 def get_poisson_gaussian_nll(
-        var_nxy: torch.Tensor,
-        pred_nxy: torch.Tensor,
-        obs_nxy: torch.Tensor,
-        mask_nxy: torch.Tensor):
-    return 0.5 * mask_nxy * (var_nxy.log() + (pred_nxy - obs_nxy).pow(2) / var_nxy)
+        var_ntxy: torch.Tensor,
+        pred_ntxy: torch.Tensor,
+        obs_ntxy: torch.Tensor,
+        mask_ntxy: torch.Tensor,
+        scale_ntxy: torch.Tensor):
+    log_var_ntxy = var_ntxy.log(dim=(0, 2, 3))[None, :, None, None]
+    return 0.5 * mask_ntxy * (log_var_ntxy + (pred_ntxy - obs_ntxy).square() / var_ntxy) * scale_ntxy
     
 
 def get_noise2self_loss(
         batch_data,
         ws_denoising_list: List[OptopatchDenoisingWorkspace],
-        spatial_unet_processor: torch.nn.Module,
-        temporal_denoiser: torch.nn.Module,
+        denoising_model: DenoisingModel,
         loss_type: str,
         norm_p: int,
         enable_continuity_reg: bool,
@@ -258,32 +261,16 @@ def get_noise2self_loss(
     assert reg_func in {'clamped_linear', 'tanh'}
     assert loss_type in {'lp', 'poisson_gaussian'}
     
-    device = batch_data['padded_sliced_diff_movie_ntxy'].device
-    dtype = batch_data['padded_sliced_diff_movie_ntxy'].dtype
     x_window = batch_data['x_window']
     y_window = batch_data['y_window']
-    padded_x_window = batch_data['padded_x_window']
-    padded_y_window = batch_data['padded_y_window']
-    n_batch, t_total = batch_data['padded_sliced_diff_movie_ntxy'].shape[:2]
-    n_global_features = batch_data['padded_global_features_nfxy'].shape[-3]
-    t_tandem = batch_data['padded_occlusion_masks_ntxy'].shape[-3] - 1
-    t_order = t_total - t_tandem
-    t_mid = (t_order + t_tandem - 1) // 2
+    t_total = batch_data['padded_sliced_diff_movie_ntxy'].shape[1]
+    t_tandem = t_total - denoising_model.t_order
+    t_mid = (denoising_model.t_order - 1) // 2
     total_pixels = x_window * y_window
 
     # iterate over the middle frames and accumulate loss
-    def add_lp_to_loss(_loss, _err, _norm_p=norm_p, _scale=1.):
-        _new_loss = (_scale * ((_err.abs() + eps).pow(_norm_p))).sum()
-        if _loss is None:
-            return _new_loss
-        else:
-            return _loss + _new_loss
-        
-    def add_factor_to_loss(_loss, _factor):
-        if _loss is None:
-            return _factor
-        else:
-            return _loss + _factor
+    def _compute_lp_loss(_err, _norm_p=norm_p, _scale=1.):
+        return (_scale * (_err.abs() + eps).pow(_norm_p)).sum()
             
     # fetch and crop the dataset std (for regularization)
     if enable_continuity_reg:
@@ -291,162 +278,69 @@ def get_noise2self_loss(
             batch_data['padded_global_features_nfxy'][:, batch_data['detrended_std_feature_index'], ...],
             target_width=x_window,
             target_height=y_window)
+        
+    denoised_batch_ntxy = crop_center(
+        denoising_model(batch_data),
+        target_width=x_window,
+        target_height=y_window)
 
-    unet_endpoint_rec_loss = None
-    unet_endpoint_reg_loss = None
-    temporal_endpoint_rec_loss = None
-    temporal_endpoint_reg_loss = None
-    prev_cropped_unet_endpoint_nxy = None
-    prev_cropped_temporal_endpoint_nxy = None
+    reg_loss = None
+    rec_loss = None
 
-    # calculate processed features
-    unet_output_list = [
-        spatial_unet_processor(
-            batch_data['padded_sliced_diff_movie_ntxy'][:, i_t:i_t+1, :, :],
-            batch_data['padded_global_features_nfxy'])
-        for i_t in range(t_total)]
-    unet_features_nctxy = torch.stack([output['features_ncxy'] for output in unet_output_list], dim=-3)
-    unet_readout_n1xy_list = [output['readout_ncxy'] for output in unet_output_list]
-#     unet_features_nctxy = torch.cat([
-#         unet_features_ncxy[:, :, None, :, :]
-#         for unet_features_ncxy in unet_features_ncxy_list],
-#         dim=-3)
-    unet_features_width = unet_features_nctxy.shape[-2]
-    unet_features_height = unet_features_nctxy.shape[-1]
-    unet_cropped_global_features_nfxy = crop_center(
-        batch_data['padded_global_features_nfxy'],
-        target_width=unet_features_width,
-        target_height=unet_features_height)
+    cropped_mask_ntxy = crop_center(
+        batch_data['padded_occlusion_masks_ntxy'],
+        target_width=x_window,
+        target_height=y_window)
+
+    expected_output_ntxy = crop_center(
+        batch_data['padded_middle_frames_ntxy'],
+        target_width=x_window,
+        target_height=y_window)
+    
+    # reconstruction losses
+    total_masked_pixels_t = cropped_mask_ntxy.sum(dim=1).type(denoising_model.dtype)
+    loss_scale_t = 1. / ((t_tandem + 1) * (eps + total_masked_pixels_t))
+    loss_scale_ntxy = loss_scale_t[None, :, None, None]
     
     # calculate the loss on occluded points of the middle frames
     # and total variation loss between frames (if enabled)
-    for i_t in range(t_tandem + 1):  # i_t denotes the index of the middle frames, starting from 0
+    if loss_type == 'poisson_gaussian':
+        var_ntxy = torch.cat([
+            ws_denoising_list[i_dataset].get_modeled_variance(
+                scaled_bg_movie_txy=crop_center(
+                    batch_data['padded_sliced_bg_movie_ntxy'][i_dataset, t_mid:t_mid + t_tandem + 1, ...],
+                    target_width=x_window,
+                    target_height=y_window),
+                scaled_diff_movie_txy=denoised_batch_ntxy[i_dataset, ...])
+            for i_dataset in batch_data['dataset_indices']], dim=0)
+        rec_loss = get_poisson_gaussian_nll(
+            var_ntxy=var_ntxy,
+            pred_ntxy=denoised_batch_ntxy,
+            obs_ntxy=expected_output_ntxy,
+            mask_ntxy=cropped_mask_ntxy,
+            scale_ntxy=loss_scale_ntxy).sum()
 
-        # unet readout
-        cropped_unet_endpoint_nxy = crop_center(
-            unet_readout_n1xy_list[(t_order - 1) // 2 + i_t][:, 0, :, :],
-            target_width=x_window,
-            target_height=y_window)
+    elif loss_type == 'lp':
+        err_ntxy = cropped_mask_ntxy * (denoised_batch_ntxy - expected_output_ntxy)
+        rec_loss = _compute_lp_loss(_err=err_ntxy, _norm_p=norm_p, _scale=loss_scale_ntxy)
 
-        # get the temporal denoiser output
-        cropped_temporal_endpoint_nxy = crop_center(
-            temporal_denoiser(
-                unet_features_nctxy[:, :, i_t:(i_t + t_order), :, :],
-                unet_cropped_global_features_nfxy),
-            target_width=x_window,
-            target_height=y_window)
+    else:
+        raise ValueError()
         
-        # crop the occlusion mask
-        cropped_mask_nxy = crop_center(
-            batch_data['padded_occlusion_masks_ntxy'][:, i_t, ...],
-            target_width=x_window,
-            target_height=y_window)
-                
-        # crop expected output
-        expected_output_nxy = crop_center(
-            batch_data['padded_middle_frames_ntxy'][:, i_t, ...],
-            target_width=x_window,
-            target_height=y_window)
+    if enable_continuity_reg:
+        total_variation_ntxy = get_total_variation(
+            dt_frame_ntxy=denoised_batch_ntxy[:, 1:, ...] - denoised_batch_ntxy[:, :-1, ...],
+            noise_std_nxy=cropped_movie_t_std_nxy,
+            noise_threshold_to_std=noise_threshold_to_std,
+            reg_func=reg_func,
+            eps=eps)
 
-        # reconstruction losses
-        total_masked_pixels = cropped_mask_nxy.sum().type(dtype)
-        loss_scale = 1. / ((t_tandem + 1) * (eps + total_masked_pixels))
-        
-        if loss_type == 'poisson_gaussian':
+        reg_loss = _compute_lp_loss(
+            _err=total_variation_ntxy,
+            _norm_p=norm_p,
+            _scale=continuity_reg_strength / ((t_tandem - 1) * total_pixels)) # TODO ask mehrtash abou this term
             
-            var_nxy = torch.cat([
-                ws_denoising_list[i_dataset].get_modeled_variance(
-                    scaled_bg_movie_ntxy=crop_center(
-                        batch_data['padded_sliced_bg_movie_ntxy'][i_dataset, t_mid + i_t, :, :],
-                        target_width=x_window,
-                        target_height=y_window)[None, None, :, :],
-                    scaled_diff_movie_ntxy=cropped_unet_endpoint_nxy[i_dataset, :, :][None, None, :, :])
-                for i_dataset in batch_data['dataset_indices']], dim=0)[:, 0, :, :]
-            
-            c_unet_endpoint_rec_loss = get_poisson_gaussian_nll(
-                var_nxy=var_nxy,
-                pred_nxy=cropped_unet_endpoint_nxy,
-                obs_nxy=expected_output_nxy,
-                mask_nxy=cropped_mask_nxy).sum()
-            unet_endpoint_rec_loss = add_factor_to_loss(
-                unet_endpoint_rec_loss, loss_scale * c_unet_endpoint_rec_loss)
-            
-            var_nxy = torch.cat([
-                ws_denoising_list[i_dataset].get_modeled_variance(
-                    scaled_bg_movie_ntxy=crop_center(
-                        batch_data['padded_sliced_bg_movie_ntxy'][i_dataset, t_mid + i_t, :, :],
-                        target_width=x_window,
-                        target_height=y_window)[None, None, :, :],
-                    scaled_diff_movie_ntxy=cropped_temporal_endpoint_nxy[i_dataset, :, :][None, None, :, :])
-                for i_dataset in batch_data['dataset_indices']], dim=0)[:, 0, :, :]
-
-            c_temporal_endpoint_rec_loss = get_poisson_gaussian_nll(
-                var_nxy=var_nxy,
-                pred_nxy=cropped_temporal_endpoint_nxy,
-                obs_nxy=expected_output_nxy,
-                mask_nxy=cropped_mask_nxy).sum()
-            temporal_endpoint_rec_loss = add_factor_to_loss(
-                temporal_endpoint_rec_loss, loss_scale * c_temporal_endpoint_rec_loss)
-            
-        elif loss_type == 'lp':
-        
-            unet_endpoint_rec_loss = add_lp_to_loss(
-                unet_endpoint_rec_loss,
-                cropped_mask_nxy * (cropped_unet_endpoint_nxy - expected_output_nxy),
-                _norm_p=norm_p,
-                _scale=loss_scale)
-            
-            temporal_endpoint_rec_loss = add_lp_to_loss(
-                temporal_endpoint_rec_loss,
-                cropped_mask_nxy * (cropped_temporal_endpoint_nxy - expected_output_nxy),
-                _norm_p=norm_p,
-                _scale=loss_scale)
-            
-        else:
-            
-            raise ValueError()
-                
-        # temporal continuity loss
-        if enable_continuity_reg:            
-            
-            if i_t > 0:
-               
-                unet_total_variation_nxy = get_total_variation(
-                    curr_frame_nxy=cropped_unet_endpoint_nxy,
-                    prev_frame_nxy=prev_cropped_unet_endpoint_nxy,
-                    noise_std_nxy=cropped_movie_t_std_nxy,
-                    noise_threshold_to_std=noise_threshold_to_std,
-                    reg_func=reg_func,
-                    eps=eps)
-                
-                temporal_total_variation_nxy = get_total_variation(
-                    curr_frame_nxy=cropped_temporal_endpoint_nxy,
-                    prev_frame_nxy=prev_cropped_temporal_endpoint_nxy,
-                    noise_std_nxy=cropped_movie_t_std_nxy,
-                    noise_threshold_to_std=noise_threshold_to_std,
-                    reg_func=reg_func,
-                    eps=eps)
-
-                unet_endpoint_reg_loss = add_lp_to_loss(
-                    unet_endpoint_reg_loss,
-                    unet_total_variation_nxy,
-                    _norm_p=norm_p,
-                    _scale=continuity_reg_strength / ((t_tandem - 1) * total_pixels))
-
-                temporal_endpoint_reg_loss = add_lp_to_loss(
-                    temporal_endpoint_reg_loss,
-                    temporal_total_variation_nxy,
-                    _norm_p=norm_p,
-                    _scale=continuity_reg_strength / ((t_tandem - 1) * total_pixels))
-
-            prev_cropped_unet_endpoint_nxy = cropped_unet_endpoint_nxy
-            prev_cropped_temporal_endpoint_nxy = temporal_endpoint_reg_loss
-            
-    return {
-        'unet_endpoint_rec_loss': unet_endpoint_rec_loss,
-        'unet_endpoint_reg_loss': unet_endpoint_reg_loss,
-        'temporal_endpoint_rec_loss': temporal_endpoint_rec_loss,
-        'temporal_endpoint_reg_loss': temporal_endpoint_reg_loss}
+    return {'rec_loss': rec_loss, 'reg_loss': reg_loss}
 
 
 def generate_input_for_single_frame_denoising(
@@ -535,70 +429,3 @@ def denoise_single_frame(batch_data,
             'unet_endpoint_xy': cropped_unet_endpoint_xy,
             'temporal_endpoint_xy': cropped_temporal_endpoint_xy
         }
-
-
-def get_unet_input_size(
-    output_min_size: int,
-    kernel_size: int,
-    n_conv_layers: int,
-    depth: int):
-    """Smallest input size for output size >= `output_min_size`.
-    
-    .. note:
-        The calculated input sizes guarantee that all of the layers have even dimensions.
-        This is important to prevent aliasing in downsampling (pooling) operations.
-    
-    """
-    delta = n_conv_layers * (kernel_size - 1)
-    pad = delta * sum([2 ** i for i in range(depth)])
-    ds = 2 ** depth
-    res = (output_min_size + pad) % ds
-    bottom_size = (output_min_size + pad) // ds + res
-    input_size = bottom_size
-    for i in range(depth):
-        input_size = 2 * (input_size + delta)
-    input_size += delta
-    return input_size
-
-
-def get_minimum_spatial_padding(
-        x_window: int,
-        y_window: int,
-        denoiser_config: Dict[str, Union[int, float, str]]) -> Tuple[int, int]:
-    
-    if not denoiser_config['spatial_unet_padding']:
-        
-        padded_x_window = get_unet_input_size(
-            output_min_size=(
-                x_window
-                + (denoiser_config['spatial_unet_readout_kernel_size'] - 1)
-                    * len(denoiser_config['spatial_unet_readout_hidden_layer_channels_list']) + 1),
-            kernel_size=denoiser_config['spatial_unet_kernel_size'],
-            n_conv_layers=denoiser_config['spatial_unet_n_conv_layers'],
-            depth=denoiser_config['spatial_unet_depth'])
-        padded_y_window = get_unet_input_size(
-            output_min_size=(
-                y_window
-                + (denoiser_config['spatial_unet_readout_kernel_size'] - 1)
-                    * len(denoiser_config['spatial_unet_readout_hidden_layer_channels_list']) + 1),
-            kernel_size=denoiser_config['spatial_unet_kernel_size'],
-            n_conv_layers=denoiser_config['spatial_unet_n_conv_layers'],
-            depth=denoiser_config['spatial_unet_depth'])
-    
-    else:
-        
-        padded_x_window = get_unet_input_size(
-            output_min_size=x_window,
-            kernel_size=1,
-            n_conv_layers=denoiser_config['spatial_unet_n_conv_layers'],
-            depth=denoiser_config['spatial_unet_depth'])
-        padded_y_window = get_unet_input_size(
-            output_min_size=y_window,
-            kernel_size=1,
-            n_conv_layers=denoiser_config['spatial_unet_n_conv_layers'],
-            depth=denoiser_config['spatial_unet_depth'])
-
-    x_padding = (padded_x_window - x_window) // 2
-    y_padding = (padded_y_window - y_window) // 2
-    
-    return x_padding, y_padding
