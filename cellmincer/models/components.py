@@ -3,8 +3,8 @@ import torch
 from torch import nn
 from typing import List, Tuple, Optional, Union, Dict
 
-from cellmincer.opto_utils import crop_center
-from cellmincer.opto_ws import OptopatchBaseWorkspace, OptopatchDenoisingWorkspace
+from cellmincer.util.utils import crop_center
+from cellmincer.util.ws import OptopatchBaseWorkspace, OptopatchDenoisingWorkspace
 
 
 def center_crop_1d(layer: torch.Tensor, target: torch.Tensor) -> torch.Tensor:

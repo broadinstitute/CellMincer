@@ -20,6 +20,9 @@ model:
   temporal_denoiser_kernel_size: 5
   temporal_denoiser_n_conv_layers: 3
   type: spatial-unet-2d-temporal-denoiser
+root_data_dir: /home/jupyter/bw-data/cellmincer/data
+root_denoise_dir: /home/jupyter/bw-data/cellmincer/denoise
+root_model_dir: /home/jupyter/bw-data/cellmincer/models
 state_index: null
 tag: ''
 training:
@@ -28,7 +31,7 @@ training:
   log_every: 100
   loss_type: lp
   lr_params:
-    lr: 0.0001
+    max: 0.0001
     type: const
   n_batch_per_loop: 20
   n_iters: 180000

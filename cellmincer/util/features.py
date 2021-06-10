@@ -7,6 +7,8 @@ from typing import List, Optional
 from scipy.signal import find_peaks
 from cellmincer.opto_utils import crop_center
 
+from cellmincer import consts
+
 
 logger = logging.getLogger()
 
@@ -56,8 +58,8 @@ def generate_padded_movie(
         min_y_padding: int,
         padding_mode: str,
         power_of_two: bool,
-        device: torch.device,
-        dtype=torch.dtype) -> PaddedMovieTorch:
+        device: torch.device = consts.DEFAULT_DEVICE,
+        dtype=torch.dtype = consts.DEFAULT_DTYPE) -> PaddedMovieTorch:
     
     original_n_frames = orig_movie_txy_np.shape[0]
     original_width = orig_movie_txy_np.shape[1]
@@ -271,8 +273,8 @@ class OptopatchGlobalFeatureExtractor:
             downsampling_mode: str = 'avg_pool',
             padding_mode: str = 'reflect',
             eps: float = 1e-6,
-            device: torch.device = torch.device("cuda"),
-            dtype: torch.dtype = torch.float32):
+            device: torch.device = consts.DEFAULT_DEVICE,
+            dtype: torch.dtype = consts.DEFAULT_DTYPE):
         
         self.ws_base = ws_base
         self.logger = logger

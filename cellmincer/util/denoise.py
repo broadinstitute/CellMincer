@@ -4,10 +4,10 @@ import torch
 import logging
 from typing import List, Tuple, Optional, Union, Dict
 
-from .opto_ws import OptopatchBaseWorkspace, OptopatchDenoisingWorkspace
-from .opto_utils import pad_images_torch, crop_center, get_nn_spatio_temporal_mean
+from .ws import OptopatchBaseWorkspace, OptopatchDenoisingWorkspace
+from .utils import crop_center, get_nn_spatio_temporal_mean, pad_images_torch
 
-logger = logging.getLogger()
+from cellmincer import consts
 
 
 def generate_bernoulli_mask(
@@ -15,8 +15,8 @@ def generate_bernoulli_mask(
         n_batch: int,
         width: int,
         height: int,
-        device: torch.device,
-        dtype: torch.dtype) -> torch.Tensor:
+        device: torch.device = consts.DEFAULT_DEVICE,
+        dtype: torch.dtype = consts.DEFAULT_DTYPE) -> torch.Tensor:
     return torch.distributions.Bernoulli(
         probs=torch.tensor(p, device=device, dtype=dtype)).sample(
         [n_batch, width, height]).type(dtype)
@@ -25,8 +25,8 @@ def generate_bernoulli_mask(
 def generate_bernoulli_mask_on_mask(
         p: float,
         in_mask: torch.Tensor,
-        device: torch.device,
-        dtype: torch.dtype) -> torch.Tensor:
+        device: torch.device = consts.DEFAULT_DEVICE,
+        dtype: torch.dtype = consts.DEFAULT_DTYPE) -> torch.Tensor:
     out_mask = torch.zeros(in_mask.shape, device=device, dtype=dtype)
     active_pixels = in_mask.sum()
     bern = torch.distributions.Bernoulli(
@@ -58,8 +58,8 @@ def generate_occluded_training_data(
         occlusion_prob: float,
         occlusion_radius: int,
         occlusion_strategy: str,
-        device: torch.device = torch.device('cuda'),
-        dtype: torch.dtype = torch.float32):
+        device: torch.device = consts.DEFAULT_DEVICE,
+        dtype: torch.dtype = consts.DEFAULT_DTYPE = torch.float32):
     """Generates minibatches with appropriate occlusion and padding for training a blind
     denoiser. Supports multiple datasets.
     

@@ -10,6 +10,7 @@ import pprint
 import pickle
 
 from torch.optim.lr_scheduler import LambdaLR
+from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 
 from typing import List
 import yaml
@@ -29,41 +30,47 @@ from cellmincer.opto_denoise import \
     generate_occluded_training_data, \
     get_noise2self_loss
 
-from models.__init__ import \
+from cellmincer.models import \
     initialize_model, \
     get_minimum_padding
 
-dtype = torch.float32
-root_data_dir = '/home/jupyter/bw-data/cellmincer/data'
-root_model_dir = '/home/jupyter/bw-data/cellmincer/models'
-root_denoise_dir = '/home/jupyter/bw-data/cellmincer/denoise'
+from cellmincer import consts
 
 
-def generate_lr_scheduler(optim, lr_params, n_epochs):
+def generate_lr_scheduler(optim, lr_params, n_iters):
     if lr_params['type'] == 'const':
-        func = lambda epoch: 1
-    elif lr_params['type'] == 'linear-warmup-cosine-decay':
-        peak = n_epochs * lr_params['warmup_segment']
-        func = lambda epoch: epoch / peak \
-                if epoch <= peak \
-                else (1 + np.cos(np.pi * (epoch - peak) / (n_epochs - peak))) / 2
-    return LambdaLR(optim, lr_lambda=func)
+        scheduler = LambdaLR(optim, lr_lambda=lambda it: 1)
+    elif lr_params['type'] == 'cosine-annealing-warmup':
+        scheduler = CosineAnnealingWarmupRestarts(
+            optim=optim,
+            first_cycle_steps=lr_params['cycle_len'],
+            cycle_mult=1.0,
+            max_lr=lr_params['max'],
+            min_lr=0.001,
+            warmup_steps=lr_params['warmup'],
+            gamma=1.0)
+    else:
+        raise ValueError('Unrecognized learning rate type.')
+    return scheduler
 
 def save_model_state(
         denoising_model,
         model_dir: str,
         index: int,
-        save_adam_state: bool = True,
-        save_rng_state: bool = True):
+        optim = None,
+        scheduler = None,
+        save_train_state: bool = False):
 
     torch.save(
         denoising_model.state_dict(),
         os.path.join(model_dir, f'model_state__{index:06d}.pt'))
-    if save_adam_state:
+    if save_train_state:
         torch.save(
             optim.state_dict(),
-            os.path.join(model_dir, f'adam_state__{full_model_prefix}.pt'))
-    if save_rng_state:
+            os.path.join(model_dir, f'optim_state__{full_model_prefix}.pt'))
+        torch.save(
+            scheduler.state_dict(),
+            os.path.join(model_dir, f'sched_state__{full_model_prefix}.pt'))
         torch.save(
             torch.get_rng_state(),
             os.path.join(model_dir, f'rng_state__{full_model_prefix}.pt'))
@@ -77,7 +84,7 @@ def train(
     model_dir = get_tagged_dir(
         name=config['model']['type'],
         config_tag=config['tag'],
-        root_dir=root_model_dir)
+        root_dir=config['root_model_dir'])
     if not os.path.exists(model_dir):
         os.mkdir(model_dir)
     
@@ -87,7 +94,8 @@ def train(
         torch.manual_seed(config['training']['seed'])
     denoising_model.train()
 
-    optim = torch.optim.Adam(denoising_model.parameters(), lr=config['training']['lr_params']['lr'], betas=(0.9, 0.999))
+    optim = torch.optim.Adam(denoising_model.parameters(), lr=config['training']['lr_params']['max'], betas=(0.9, 0.999))
+    scheduler = generate_lr_scheduler(optim, config['training']['lr_params'], )
     
     enable_continuity_reg = config['training']['enable_continuity_reg']
 
@@ -116,7 +124,7 @@ def train(
                 occlusion_radius=config['training']['occlusion_radius'],
                 occlusion_strategy=config['training']['occlusion_strategy'],
                 device=config['device'],
-                dtype=dtype)
+                dtype=consts.DEFAULT_DTYPE)
 
             loss_dict = get_noise2self_loss(
                 batch_data=batch_data,
@@ -147,6 +155,7 @@ def train(
 
         # stochastic update
         optim.step()
+        scheduler.step()
         
         if (i_iter + 1) % config['training']['log_every'] == 0:
             print(f'\titer {i_iter + 1}/{n_iters}')
@@ -158,8 +167,9 @@ def train(
                 denoising_model=denoising_model,
                 model_dir=model_dir,
                 index=index,
-                save_adam_state=True,
-                save_rng_state=True)
+                optim=optim,
+                scheduler=scheduler,
+                save_train_state=True)
     
     
     # save trained model
@@ -167,9 +177,7 @@ def train(
     save_model_state(
         denoising_model=denoising_model,
         model_dir=model_dir,
-        index=0,
-        save_adam_state=False,
-        save_rng_state=False)
+        index=0)
     
     return
 
@@ -180,7 +188,7 @@ def denoise(
     denoise_dir = get_tagged_dir(
         name=config['model']['type'],
         config_tag=config['tag'],
-        root_dir=root_denoise_dir)
+        root_dir=config['root_denoise_dir'])
     
     if not os.path.exists(denoise_dir):
         os.mkdir(denoise_dir)
@@ -195,8 +203,7 @@ def denoise(
         
         np.save(
             os.path.join(denoise_dir, f'{name}__denoised_tyx.npy'),
-#             denoised_movie_txy.transpose((0, 2, 1)))
-            denoised_movie_txy)
+            denoised_movie_txy.transpose((0, 2, 1)))
         
     return
 
@@ -206,7 +213,7 @@ def load_datasets(config: dict) -> List[OptopatchDenoisingWorkspace]:
     dataset_dirs = [get_tagged_dir(
             name=dataset,
             config_tag=config['tag'],
-            root_dir=root_data_dir)
+            root_dir=config['root_data_dir'])
         for dataset in datasets]
     
     assert all([os.path.exists(dataset_dir) for dataset_dir in dataset_dirs])
@@ -241,7 +248,7 @@ def load_datasets(config: dict) -> List[OptopatchDenoisingWorkspace]:
                 x_padding=x_padding,
                 y_padding=y_padding,
                 device=config['device'],
-                dtype=dtype
+                dtype=consts.DEFAULT_DTYPE
             )
         )
         
@@ -258,14 +265,14 @@ def instance_model(
         denoising_model = initialize_model(
             config['model'],
             device=config['device'],
-            dtype=dtype)
+            dtype=consts.DEFAULT_DTYPE)
     else:
         model_state_path = os.path.join(model_dir, f'model_state__{config["state_index"]:06d}.pt')
         denoising_model = initialize_model(
             config['model'],
             model_state_path=model_state_path,
             device=config['device'],
-            dtype=dtype)
+            dtype=consts.DEFAULT_DTYPE)
     
     return denoising_model
 
@@ -295,7 +302,7 @@ if __name__ == '__main__':
     model_dir = get_tagged_dir(
         name=config['model']['type'],
         config_tag=config['tag'],
-        root_dir=root_model_dir)
+        root_dir=config['root_model_dir'])
     denoising_model = instance_model(
         config=config,
         n_global_features=ws_denoising_list[0].n_global_features,

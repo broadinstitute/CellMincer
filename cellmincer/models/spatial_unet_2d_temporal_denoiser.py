@@ -3,17 +3,14 @@ import torch
 from torch import nn
 from typing import List, Tuple, Dict
 
-import sys
-sys.path.append('../cellmincer')
-
 from .denoising_model import DenoisingModel
-
-from opto_models import \
+from .components import \
     ConditionalUNet, \
     TemporalDenoiser, \
     activation_from_str
-from opto_utils import crop_center
-from opto_ws import OptopatchDenoisingWorkspace
+
+from cellmincer.util.utils import crop_center
+from cellmincer.util.ws import OptopatchDenoisingWorkspace
 
 
 class SpatialUnet2dTemporalDenoiser(DenoisingModel):

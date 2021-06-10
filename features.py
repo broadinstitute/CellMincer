@@ -17,8 +17,6 @@ from cellmincer.opto_features import OptopatchGlobalFeatureExtractor
 
 from cellmincer.opto_utils import get_tagged_dir
 
-root_data_dir = '/home/jupyter/bw-data/cellmincer/data'
-
 
 def features(config_file):
     with open(config_file, 'r') as stream:
@@ -34,7 +32,7 @@ def features(config_file):
     dataset_dirs = [get_tagged_dir(
             name=dataset,
             config_tag=config['tag'],
-            root_dir=root_data_dir)
+            root_dir=config['root_data_dir'])
         for dataset in datasets]
     
     assert all([os.path.exists(dataset_dir) for dataset_dir in dataset_dirs])

@@ -5,8 +5,10 @@ import torch
 import logging
 from typing import List, Tuple, Optional, Dict
 
-from cellmincer.opto_utils import get_cosine_similarity_with_sequence_np
-from cellmincer.opto_features import OptopatchGlobalFeatureContainer
+from .utils import get_cosine_similarity_with_sequence_np
+from .features import OptopatchGlobalFeatureContainer
+
+from cellmincer import consts
 
 logger = logging.getLogger()
 
@@ -194,8 +196,8 @@ class OptopatchGlobalFeaturesTorchCache:
             features: OptopatchGlobalFeatureContainer,
             x_padding: int,
             y_padding: int,
-            device: torch.device,
-            dtype: torch.dtype):
+            device: torch.device = consts.DEFAULT_DEVICE,
+            dtype: torch.dtype = consts.DEFAULT_DTYPE):
         self.x_padding = x_padding
         self.y_padding = y_padding
         self.device = device
@@ -232,8 +234,8 @@ class OptopatchDenoisingWorkspace:
                  features: OptopatchGlobalFeatureContainer,
                  x_padding: int,
                  y_padding: int,
-                 device: torch.device,
-                 dtype: torch.dtype):
+                 device: torch.device = consts.DEFAULT_DEVICE,
+                 dtype: torch.dtype = consts.DEFAULT_DTYPE):
         self.ws_base_diff = ws_base_diff
         self.ws_base_bg = ws_base_bg
         self.noise_params = noise_params

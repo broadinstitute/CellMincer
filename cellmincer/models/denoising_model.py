@@ -4,9 +4,8 @@ from torch import nn
 from typing import List, Tuple, Dict
 
 import sys
-sys.path.append('../cellmincer')
 
-from opto_ws import OptopatchBaseWorkspace, OptopatchDenoisingWorkspace
+from cellmincer.util.ws import OptopatchBaseWorkspace, OptopatchDenoisingWorkspace
 
 
 class DenoisingModel(nn.Module):

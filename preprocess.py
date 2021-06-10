@@ -18,8 +18,7 @@ from sklearn.linear_model import LinearRegression
 from abc import abstractmethod
 from typing import List, Tuple
 
-dtype = torch.float32
-root_data_dir = '/home/jupyter/bw-data/cellmincer/data'
+from cellmincer import consts
 
 
 def preprocess(config_file):
@@ -40,7 +39,7 @@ def preprocess(config_file):
         data_dir = get_tagged_dir(
             name=dataset['name'],
             config_tag=config['tag'],
-            root_dir=root_data_dir)
+            root_dir=config['root_data_dir'])
         if not os.path.exists(data_dir):
             os.mkdir(data_dir)
         print(f'\t({i_dataset + 1}/{len(datasets)}) {data_dir}')
@@ -84,7 +83,7 @@ def preprocess(config_file):
         data_dir = get_tagged_dir(
             name=dataset['name'],
             config_tag=config['tag'],
-            root_dir=root_data_dir)
+            root_dir=config['root_data_dir'])
         
         trend_sub_movie_txy = np.concatenate([
             seg_txy - mu_txy
@@ -239,8 +238,8 @@ def detrend(
     for i_segment in range(ds_params['n_segments']):
         # get segment for fitting
         t_fit, fit_seg_txy = get_flanking_segments(movie_txy, i_segment, trim_config, ds_params)
-        t_fit_torch = torch.tensor(t_fit, device=device, dtype=dtype)
-        fit_seg_txy_torch = torch.tensor(fit_seg_txy, device=device, dtype=dtype)
+        t_fit_torch = torch.tensor(t_fit, device=device, dtype=consts.DEFAULT_DTYPE)
+        fit_seg_txy_torch = torch.tensor(fit_seg_txy, device=device, dtype=consts.DEFAULT_DTYPE)
         width, height = fit_seg_txy_torch.shape[1:]
 
         if detrend_config['trend_model'] == 'polynomial':
@@ -249,14 +248,14 @@ def detrend(
                 fit_seg_txy_torch=fit_seg_txy_torch,
                 poly_order=detrend_config['poly_order'],
                 device=device,
-                dtype=dtype)
+                dtype=consts.DEFAULT_DTYPE)
         elif detrend_config['trend_model'] == 'exponential':
             trend_model = ExponentialDecayIntensityTrendModel(
                 t_fit=t_fit,
                 fit_seg_txy=fit_seg_txy,
                 init_unc_decay_rate=detrend_config['init_unc_decay_rate'],
                 device=device,
-                dtype=dtype)
+                dtype=consts.DEFAULT_DTYPE)
         else:
             raise ValueError()
 
@@ -280,7 +279,7 @@ def detrend(
         print(f'\tdetrended segment {i_segment + 1}/{ds_params["n_segments"]} | loss = {loss / (width * height * len(t_fit)):.6f}')
 
         t_trimmed, trimmed_seg_txy = get_trimmed_segment(movie_txy, i_segment, trim_config, ds_params)
-        t_trimmed_torch = torch.tensor(t_trimmed, device=device, dtype=dtype)
+        t_trimmed_torch = torch.tensor(t_trimmed, device=device, dtype=consts.DEFAULT_DTYPE)
         mu_txy = trend_model.get_baseline_txy(t_trimmed_torch).detach().cpu().numpy()
 
         if detrend_config['plot_segments']:
@@ -382,7 +381,7 @@ class ExponentialDecayIntensityTrendModel(IntensityTrendModel):
         self.pos_trans = torch.nn.Softplus()
         self.unc_decay_rate_xy = torch.nn.Parameter(
             init_unc_decay_rate * torch.ones(
-                fit_seg_txy.shape[1:], dtype=dtype, device=device))
+                fit_seg_txy.shape[1:], dtype=consts.DEFAULT_DTYPE, device=device))
         
         init_decay_rate = self.pos_trans(torch.tensor(init_unc_decay_rate)).item()
         before_stim_mean_xy = np.mean(fit_seg_txy[:len(t_fit)//2, ...], 0)
@@ -393,8 +392,8 @@ class ExponentialDecayIntensityTrendModel(IntensityTrendModel):
         a_xy = torch.tensor(
             (before_stim_mean_xy - after_stim_mean_xy) / (
                 np.exp(-init_decay_rate * t_0) - np.exp(-init_decay_rate * t_1)),
-            dtype=dtype, device=device)
-        b_xy = (torch.tensor(before_stim_mean_xy, dtype=dtype, device=device)
+            dtype=consts.DEFAULT_DTYPE, device=device)
+        b_xy = (torch.tensor(before_stim_mean_xy, dtype=consts.DEFAULT_DTYPE, device=device)
                 - np.exp(-init_decay_rate * t_0) * a_xy)
         
         self.a_xy = torch.nn.Parameter(a_xy)
