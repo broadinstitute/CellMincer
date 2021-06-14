@@ -1,65 +1,26 @@
 import os
 import yaml
 import logging
-import pself.log_info
+import pprint
 import time
 import math
 
 import numpy as np
 import torch
-from typing import Dict, Any, Callable, Optional
+from typing import List
 
 from cellmincer import consts
-
-from mighty_codes.ptpsa import \
-    BatchedStateManipulator, \
-    BatchedStateEnergyCalculator, \
-    MCMCAcceptanceRatePredictor, \
-    PyTorchBatchedSimulatedAnnealing, \
-    SimulatedAnnealingExitCode
-
-from mighty_codes.torch_utils import \
-    to_np, \
-    to_torch, \
-    to_one_hot_encoded
-
-from mighty_codes.nn_utils import \
-    generate_dense_nnet
-
-from mighty_codes.channel_utils import \
-    calculate_bac_standard_metric_dict, \
-    calculate_bac_f1_reject_auc_metric_dict
-
-from mighty_codes.experiments import \
-    ChannelModelSpecification, \
-    ExperimentSpecification
-
-from mighty_codes.channels import \
-    BinaryChannelSpecification, \
-    BinaryAsymmetricChannelModel
-
-from mighty_codes.ptpsa import \
-    PyTorchBatchedSimulatedAnnealing, \
-    SimulatedAnnealingExitCode, \
-    estimate_energy_scale
-
-from mighty_codes.plot_utils import \
-    plot_sa_trajectory, \
-    plot_sa_codebook, \
-    plot_sa_resampling_buffer
-
-log_info = logging.info
+from cellmincer.models import DenoisingModel
+from cellmincer.util import OptopatchDenoisingWorkspace, get_tagged_dir
 
 class Setup:
-    def __init__(self, params, logger = None):
+    def __init__(
+            self,
+            params: dict):
         self.params = params
         
-        if logger is None:
-            logger = log_info
-        self.log_info = logger
-        
     def load_datasets(self) -> List[OptopatchDenoisingWorkspace]:
-        self.log_info('Loading datasets...')
+        logging.info('Loading datasets...')
         datasets = self.params['datasets']
         dataset_dirs = [get_tagged_dir(
                 name=dataset,
@@ -68,11 +29,6 @@ class Setup:
             for dataset in datasets]
 
         assert all([os.path.exists(dataset_dir) for dataset_dir in dataset_dirs])
-
-        x_padding, y_padding = get_minimum_padding(
-            model_config=self.params['model'],
-            training_x_window=self.params['training']['training_x_window'],
-            training_y_window=self.params['training']['training_y_window'])
 
         ws_denoising_list = []
         for i_dataset in range(len(datasets)):
@@ -96,8 +52,8 @@ class Setup:
                     ws_base_bg=ws_base_bg,
                     noise_params=noise_params,
                     features=feature_container,
-                    x_padding=x_padding,
-                    y_padding=y_padding,
+                    x_padding=0,
+                    y_padding=0,
                     device=self.params['device'],
                     dtype=consts.DEFAULT_DTYPE
                 )
@@ -121,14 +77,14 @@ class Setup:
                 device=self.params['device'],
                 dtype=consts.DEFAULT_DTYPE)
         else:
-            model_state_path = os.path.join(model_dir, f'model_state__{self.params['state_index']:06d}.pt')
+            model_state_path = os.path.join(model_dir, f'{self.params["state_index"]:06d}', 'model_state.pt')
             denoising_model = initialize_model(
                 self.params['model'],
                 model_state_path=model_state_path,
                 device=self.params['device'],
                 dtype=consts.DEFAULT_DTYPE)
     
-    return denoising_model
+        return denoising_model
 
     def run(self):
         ws_denoising_list = load_datasets(config)
@@ -140,20 +96,41 @@ class Setup:
         return ws_denoising_list, denoising_model
     
 class Train:
-    def __init__(self, params, ws_denoising_list, denoising_model, logger = None):
+    def __init__(
+            self,
+            params: dict,
+            ws_denoising_list: List[OptopatchDenoisingWorkspace],
+            denoising_model: DenoisingModel,
+            logger = None):
         self.params = params
         self.ws_denoising_list = ws_denoising_list
         self.denoising_model = denoising_model
         
         if logger is None:
             logger = log_info
-        self.log_info = logger
+        logging.info = logger
+        if self.params["state_index"]:
+            model_dir = get_tagged_dir(
+                name=self.params['model']['type'],
+                config_tag=self.params['tag'],
+                root_dir=self.params['root_model_dir'])
+            self.optim = torch.load(
+                os.path.join(model_dir, f'{self.params["state_index"]:06d}', 'optim_state.pt'))
+            self.sched = torch.load(
+                os.path.join(model_dir, f'{self.params["state_index"]:06d}', 'sched_state.pt'))
+        else:
+            self.optim = None
+            self.sched = None
         
-    def generate_lr_scheduler(optim, lr_params, n_iters):
+    def generate_lr_scheduler(
+            self,
+            optim: torch.optim.Optimizer,
+            lr_params: dict,
+            n_iters: int):
         if lr_params['type'] == 'const':
-            scheduler = LambdaLR(optim, lr_lambda=lambda it: 1)
+            sched = LambdaLR(optim, lr_lambda=lambda it: 1)
         elif lr_params['type'] == 'cosine-annealing-warmup':
-            scheduler = CosineAnnealingWarmupRestarts(
+            sched = CosineAnnealingWarmupRestarts(
                 optim=optim,
                 first_cycle_steps=lr_params['cycle_len'],
                 cycle_mult=1.0,
@@ -163,29 +140,31 @@ class Train:
                 gamma=1.0)
         else:
             raise ValueError('Unrecognized learning rate type.')
-        return scheduler
+        return sched
 
     def save_model_state(
-            denoising_model,
+            self,
+            denoising_model: DenoisingModel,
             model_dir: str,
             index: int,
             optim = None,
-            scheduler = None,
+            sched = None,
             save_train_state: bool = False):
+        
+        model_ckpt_dir = os.path.join(model_dir, f'{index:06d}')
+        if not os.path.exists(model_ckpt_dir):
+            os.mkdir(model_ckpt_dir)
 
         torch.save(
             denoising_model.state_dict(),
-            os.path.join(model_dir, f'model_state__{index:06d}.pt'))
+            os.path.join(model_ckpt_dir, 'model_state.pt'))
         if save_train_state:
             torch.save(
                 optim.state_dict(),
-                os.path.join(model_dir, f'optim_state__{full_model_prefix}.pt'))
+                os.path.join(model_ckpt_dir, 'optim_state.pt'))
             torch.save(
-                scheduler.state_dict(),
-                os.path.join(model_dir, f'sched_state__{full_model_prefix}.pt'))
-            torch.save(
-                torch.get_rng_state(),
-                os.path.join(model_dir, f'rng_state__{full_model_prefix}.pt'))
+                sched.state_dict(),
+                os.path.join(model_ckpt_dir, 'sched_state.pt'))
         
     def run(self):
         model_dir = get_tagged_dir(
@@ -196,28 +175,44 @@ class Train:
             os.mkdir(model_dir)
 
         # train model
-        self.log_info('Training model...')
+        logging.info('Training model...')
+        x_window, y_window = denoising_model.get_best_input_size(
+            self.params['output_min_size_lo'],
+            self.params['output_min_size_hi'])
+        
         if self.params['training']['seed'] is not None:
             torch.manual_seed(self.params['training']['seed'])
         denoising_model.train()
 
-        optim = torch.optim.Adam(denoising_model.parameters(), lr=self.params['training']['lr_params']['max'], betas=(0.9, 0.999))
-        scheduler = self.generate_lr_scheduler(optim, self.params['training']['lr_params'], )
+        n_iters = self.params['training']['n_iters']
+        n_loop = self.params['training']['n_loop']
+
+        if self.optim is None:
+            # TODO: change to SGD for annealed cosine warmup
+            self.optim = \
+                torch.optim.Adam(denoising_model.parameters(), lr=self.params['training']['lr_params']['max'], betas=(0.9, 0.999))
+        if self.sched is None:
+            self.sched = self.generate_lr_scheduler(optim, self.params['training']['lr_params'], n_iters)
 
         enable_continuity_reg = self.params['training']['enable_continuity_reg']
+        start_iter = (
+            self.params["state_index"] * self.params['training']['save_every']
+            if self.params["state_index"] else 0)
 
         rec_loss_hist = []
         reg_loss_hist = []
 
-        n_iters = self.params['training']['n_iters']
-        n_loop = self.params['training']['n_loop']
-
-        for i_iter in range(n_iters):
+        update_time = True
+        for i_iter in range(start_iter, n_iters):
+            if update_time:
+                start = time.time()
+                update_time = False
+            
             c_rec_loss_hist = []
             c_reg_loss_hist = []
 
             optim.zero_grad()
-
+            
             # aggregate gradients
             for i_loop in range(n_loop):
                 batch_data = generate_occluded_training_data(
@@ -225,8 +220,8 @@ class Train:
                     t_order=denoising_model.t_order,
                     t_tandem=self.params['training']['t_tandem'],
                     n_batch=self.params['training']['n_batch_per_loop'],
-                    x_window=self.params['training']['training_x_window'],
-                    y_window=self.params['training']['training_y_window'],
+                    x_window=x_window,
+                    y_window=y_window,
                     occlusion_prob=self.params['training']['occlusion_prob'],
                     occlusion_radius=self.params['training']['occlusion_radius'],
                     occlusion_strategy=self.params['training']['occlusion_strategy'],
@@ -257,44 +252,50 @@ class Train:
             # weight decay
             for group in optim.param_groups:
                 for param in group['params']:
-                    # TODO check that this still works
-                    param.data *= (1 - self.params['training']['wd'] * group['lr'])
+                    param.data *= (1 - self.params['training']['weight_decay'] * group['lr'])
 
             # stochastic update
             optim.step()
-            scheduler.step()
+            sched.step()
 
             if (i_iter + 1) % self.params['training']['log_every'] == 0:
-                self.log_info(f'\titer {i_iter + 1}/{n_iters}')
+                elapsed = time.time() - start
+                update_time = True
+                logging.info(f'iter {i_iter + 1}/{n_iters} -- {elapsed / self.params["training"]["log_every"]:.2f} s/iter')
 
             if (i_iter + 1) % self.params['training']['save_every'] == 0:
                 index = (i_iter + 1) // self.params['training']['save_every']
-                self.log_info(f'Saving checkpoint at index {index}')
+                logging.info(f'Saving checkpoint at index {index}')
                 save_model_state(
                     denoising_model=denoising_model,
                     model_dir=model_dir,
                     index=index,
                     optim=optim,
-                    scheduler=scheduler,
+                    sched=sched,
                     save_train_state=True)
 
 
         # save trained model
-        self.log_info('Training complete; saving model...')
+        logging.info('Training complete; saving model...')
         self.save_model_state(
             denoising_model=denoising_model,
             model_dir=model_dir,
             index=0)
         
 class Denoise:
-    def __init__(self, params, ws_denoising_list, denoising_model, logger = None):
+    def __init__(
+            self,
+            params: dict,
+            ws_denoising_list: List[OptopatchDenoisingWorkspace],
+            denoising_model: DenoisingModel,
+            logger = None):
         self.params = params
         self.ws_denoising_list = ws_denoising_list
         self.denoising_model = denoising_model
         
         if logger is None:
             logger = log_info
-        self.log_info = logger
+        logging.info = logger
     
     def run(self):
         denoise_dir = get_tagged_dir(
@@ -307,7 +308,7 @@ class Denoise:
 
         print('Denoising movies...')
         for i_dataset, (name, ws_denoising) in enumerate(zip(config['datasets'], ws_denoising_list)):
-            print(f'\t({i_dataset + 1}/{len(ws_denoising_list)}) {name}')
+            start = time.time()
             denoised_movie_txy = denoising_model.denoise_movie(ws_denoising).numpy()
 
             denoised_movie_txy *= ws_denoising.cached_features.norm_scale
@@ -316,3 +317,6 @@ class Denoise:
             np.save(
                 os.path.join(denoise_dir, f'{name}__denoised_tyx.npy'),
                 denoised_movie_txy.transpose((0, 2, 1)))
+            
+            elapsed = time.time() - start
+            print(f'({i_dataset + 1}/{len(ws_denoising_list)}) {name} -- {elapsed:.2f} s')

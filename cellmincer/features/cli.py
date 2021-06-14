@@ -1,4 +1,4 @@
-'''Command-line tool functionality for `cellmincer run`.'''
+'''Command-line tool functionality for `cellmincer features`.'''
 
 import yaml
 import logging
@@ -7,14 +7,14 @@ import sys
 from datetime import datetime
 
 from cellmincer.cli.base_cli import AbstractCLI
-from cellmincer.run.main import Setup, Train, Denoise
+from cellmincer.features.main import Features
 
 
 class CLI(AbstractCLI):
     '''CLI implements AbstractCLI from the cellmincer.cli package.'''
 
     def __init__(self):
-        self.name = 'run'
+        self.name = 'features'
         self.args = None
 
     def get_name(self) -> str:
@@ -28,10 +28,6 @@ class CLI(AbstractCLI):
             args.input_yaml_file = os.path.expanduser(args.input_yaml_file)
         except TypeError:
             raise ValueError('Problem with provided input paths.')
-        
-        if not (args.train or args.denoise):
-            # TODO: can this be raised as a parser error?
-            raise ValueError('No action requested, add --train or --denoise.')
 
         self.args = args
 
@@ -47,27 +43,20 @@ class CLI(AbstractCLI):
             raise RuntimeError(f'Error loading the input YAML file {args.input_yaml_file}!')
         
         # Send logging messages to stdout as well as a log file.
-        log_file = os.path.join(params['log_dir'], 'cellmincer_run.log')
+        log_file = os.path.join(params['log_dir'], 'cellmincer_features.log')
         logging.basicConfig(
             level=logging.INFO,
-            format='cellmincer:run:%(asctime)s: %(message)s',
+            format='cellmincer:features:%(asctime)s: %(message)s',
             filename=log_file,
             filemode='w')
         console = logging.StreamHandler()
-        formatter = logging.Formatter('cellmincer:run:%(asctime)s: %(message)s', '%H:%M:%S')
+        formatter = logging.Formatter('cellmincer:features:%(asctime)s: %(message)s', '%H:%M:%S')
         console.setFormatter(formatter)  # Use the same format for stdout.
         logging.getLogger('').addHandler(console)  # Log to stdout and a file.
 
         # Log the command as typed by user.
-        logging.info('Command:\n' + ' '.join(['cellmincer', 'run'] + sys.argv[2:]))
+        logging.info('Command:\n' + ' '.join(['cellmincer', 'features'] + sys.argv[2:]))
                                       
-        # instantiate
-        setup = Setup(params)
-        run_setup = setup.run()
-        
-        if args.train:
-            train = Train(params, *run_setup)
-            train.run()
-        if args.denoise:
-            denoise = Denoise(params, *run_setup)
-            denoise.run()
+        # compute global features
+        features = Features(params)
+        features.run()

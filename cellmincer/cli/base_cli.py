@@ -13,8 +13,9 @@ import importlib
 
 # New tools should be added to this list.
 TOOL_NAME_LIST = [
-    'sa-bac',
-    'yaml-tools'
+    'preprocess',
+    'features',
+    'run'
 ]
 
 
@@ -49,7 +50,7 @@ def generate_cli_dictionary() -> Dict[str, AbstractCLI]:
     for tool_name in TOOL_NAME_LIST:
         # Note: tool name contains a dash, while folder name uses an underscore.
         # Generate the name of the module that contains the tool.
-        module_cli_str_list = ["mighty_codes", tool_name.replace("-", "_"), "cli"]
+        module_cli_str_list = ["cellmincer", tool_name.replace("-", "_"), "cli"]
 
         # Import the module.
         module_cli = importlib.import_module('.'.join(module_cli_str_list))
@@ -64,18 +65,17 @@ def generate_cli_dictionary() -> Dict[str, AbstractCLI]:
 def get_populated_argparser() -> argparse.ArgumentParser:
     # Set up argument parser.
     parser = argparse.ArgumentParser(
-        prog="mighty-codes",
-        description="MightyCodes is a software package for designing optimal short codes "
-                    "for ultra-low-bandwidth communication systems.")
+        prog="cellmincer",
+        description="CellMincer is a software package for self-supervised video denoising.")
 
     # Declare the existence of sub-parsers.
     subparsers = parser.add_subparsers(
         title="sub-commands",
-        description="valid mighty-codes commands",
+        description="valid cellmincer commands",
         dest="tool")
 
     for tool_name in TOOL_NAME_LIST:
-        module_argparse_str_list = ["mighty_codes", tool_name.replace("-", "_"), "argparse"]
+        module_argparse_str_list = ["cellmincer", tool_name.replace("-", "_"), "argparse"]
         module_argparse = importlib.import_module('.'.join(module_argparse_str_list))
         subparsers = module_argparse.add_subparser_args(subparsers)
 

@@ -10,12 +10,6 @@ from .features import OptopatchGlobalFeatureContainer
 
 from cellmincer import consts
 
-logger = logging.getLogger()
-
-
-def log_info(msg: str):
-    logger.warning(msg)
-
 
 class OptopatchBaseWorkspace:
     """Workspace for caching useful quantities"""
@@ -44,7 +38,7 @@ class OptopatchBaseWorkspace:
             dtype = np.float32,
             neighbor_dx_dy_list: List[Tuple[int, int]] = DEFAULT_NEIGHBOR_DX_DY_LIST):
         # load the movie
-        log_info(f"Loading movie from {movie_bin_path} ...")
+        logging.debug(f"Loading movie from {movie_bin_path} ...")
         shape_dict = {'x': width, 'y': height, 't': n_frames}
         shape = tuple(map(shape_dict.get, order))
         movie_nnn = np.fromfile(movie_bin_path, dtype=np.uint16).reshape(shape, order='C')
@@ -61,7 +55,7 @@ class OptopatchBaseWorkspace:
             dtype = np.float32,
             neighbor_dx_dy_list: List[Tuple[int, int]] = DEFAULT_NEIGHBOR_DX_DY_LIST):
         # load the movie
-        log_info(f"Loading movie from {movie_npy_path} ...")
+        logging.debug(f"Loading movie from {movie_npy_path} ...")
         movie_nnn = np.load(movie_npy_path).astype(dtype)
         movie_txy = movie_nnn.transpose(tuple(map(order.find, 'txy')))
         return OptopatchBaseWorkspace(
@@ -77,7 +71,7 @@ class OptopatchBaseWorkspace:
             dtype = np.float32,
             neighbor_dx_dy_list: List[Tuple[int, int]] = DEFAULT_NEIGHBOR_DX_DY_LIST):
         # load the movie
-        log_info(f"Loading movie from {movie_npz_path} ...")
+        logging.debug(f"Loading movie from {movie_npz_path} ...")
         
         npz_file = np.load(movie_npz_path)
         movie_nnn = npz_file[key].astype(dtype)
@@ -113,25 +107,25 @@ class OptopatchBaseWorkspace:
     @cachedproperty
     def movie_t_mean_xy(self):
         """Temporal mean"""
-        log_info("Calculating temporal mean ...")
+        logging.debug("Calculating temporal mean ...")
         return np.mean(self.movie_txy, 0).astype(self.dtype)
     
     @cachedproperty
     def movie_t_std_xy(self):
         """Temporal std"""
-        log_info("Calculating temporal std ...")
+        logging.debug("Calculating temporal std ...")
         return np.std(self.movie_txy, 0).astype(self.dtype)
     
     @property
     def movie_zero_mean_txy(self):
         """Temporal zero-mean movie"""
-        log_info("Calculating zero-mean movie ...")
+        logging.debug("Calculating zero-mean movie ...")
         return (self.movie_txy - self.movie_t_mean_xy[None, ...]).astype(self.dtype)
     
     @cachedproperty
     def movie_t_corr_xy_list(self) -> List[np.ndarray]:
         """Peason correlation with nearest neighobrs"""
-        log_info("Calculating temporal correlation with neighbors ...")
+        logging.debug("Calculating temporal correlation with neighbors ...")
         movie_t_corr_xy_list = []
         movie_zero_mean_txy = self.movie_zero_mean_txy
         for dx, dy in self.neighbor_dx_dy_list:

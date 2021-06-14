@@ -4,4 +4,4 @@ scipy
 torch
 boltons
 pyyaml
-git+https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup
+cosine_annealing_warmup==2.0

@@ -5,12 +5,10 @@ import pickle
 from dataclasses import dataclass, field
 from typing import List, Optional
 from scipy.signal import find_peaks
-from cellmincer.opto_utils import crop_center
+
+from .utils import crop_center
 
 from cellmincer import consts
-
-
-logger = logging.getLogger()
 
 
 @dataclass
@@ -59,7 +57,7 @@ def generate_padded_movie(
         padding_mode: str,
         power_of_two: bool,
         device: torch.device = consts.DEFAULT_DEVICE,
-        dtype=torch.dtype = consts.DEFAULT_DTYPE) -> PaddedMovieTorch:
+        dtype: torch.dtype = consts.DEFAULT_DTYPE) -> PaddedMovieTorch:
     
     original_n_frames = orig_movie_txy_np.shape[0]
     original_width = orig_movie_txy_np.shape[1]
@@ -249,15 +247,6 @@ def upsample_to_numpy(frame_xy: torch.Tensor, depth: int):
 
 def get_continuous_1d_mask(mask_t: np.ndarray, smoothing = 11) -> np.ndarray:
     smooth_mask_t = np.convolve(mask_t, np.ones(smoothing)/smoothing, mode='same')
-    
-#     assert len(mask_t) >= 3
-#     while True:
-#         adj_xor = np.logical_xor(new_mask_t[1:], new_mask_t[:-1])
-#         double_flip = np.logical_and(adj_xor[1:], adj_xor[:-1])
-#         if np.any(double_flip):
-#             new_mask_t[1:] |= new_mask_t[:-1]
-#         else:
-#             break
     return smooth_mask_t > 0.5
 
     
@@ -265,7 +254,6 @@ class OptopatchGlobalFeatureExtractor:
     def __init__(
             self,
             ws_base: 'OptopatchBaseWorkspace',
-            logger: logging.Logger = None,
             select_active_t_range: bool = True,
             max_depth: int = 3,
             detrending_order: int = 10,
@@ -277,7 +265,6 @@ class OptopatchGlobalFeatureExtractor:
             dtype: torch.dtype = consts.DEFAULT_DTYPE):
         
         self.ws_base = ws_base
-        self.logger = logger
         self.select_active_t_range = select_active_t_range
         self.max_depth = max_depth
         self.detrending_order = detrending_order
@@ -295,10 +282,6 @@ class OptopatchGlobalFeatureExtractor:
         
         # populate features
         self._populate_features()
-        
-    def log_info(self, msg: str):
-        if logger is not None:
-            logger.warning(msg)
         
     @staticmethod
     def determine_active_t_range(
@@ -321,7 +304,7 @@ class OptopatchGlobalFeatureExtractor:
             peaks, _ = find_peaks(m_histo, prominence=prominence)
             threshold = (m_bins[peaks[0]] + m_bins[peaks[1]]) / 2
 #             threshold = threshold_otsu(m_t)
-            logger.warning(f'threshold: {threshold}')
+            logging.info(f'threshold: {threshold}')
             
             active_mask_t = get_continuous_1d_mask(m_t > threshold)
         else:
@@ -376,8 +359,7 @@ class OptopatchGlobalFeatureExtractor:
 
         for depth in range(self.max_depth + 1):
             if depth > 0:
-                # TODO commented out some logs
-#                 self.log_info(f'Downsampling to depth {depth}...')
+                logging.debug(f'Downsampling to depth {depth}...')
                 current_padded_movie = get_spatially_downsampled(
                     padded_movie=prev_padded_movie,
                     mode=self.downsampling_mode)
@@ -432,7 +414,7 @@ class OptopatchGlobalFeatureExtractor:
 
             for (dt, dx, dy) in corr_displacement_list:
 
-#                 self.log_info(f'Calculating x-corr ({dt}, {dx}, {dy}) at depth {depth} for detrended movie...')
+                logging.debug(f'Calculating x-corr ({dt}, {dx}, {dy}) at depth {depth} for detrended movie...')
                 current_cross_corr_xy = calculate_cross(
                     padded_movie=current_padded_movie,
                     trend_movie=current_trend_movie,
@@ -448,7 +430,7 @@ class OptopatchGlobalFeatureExtractor:
                 self.features.feature_depth_list.append(depth)
                 self.features.feature_name_list.append(f'detrended_corr_{depth}_{dt}_{dx}_{dy}')
 
-#                 self.log_info(f'Calculating x-corr ({dt}, {dx}, {dy}) at depth {depth} for the trend...')
+                logging.debug(f'Calculating x-corr ({dt}, {dx}, {dy}) at depth {depth} for the trend...')
                 current_cross_corr_xy = calculate_cross(
                     padded_movie=current_trend_movie,
                     trend_movie=None,

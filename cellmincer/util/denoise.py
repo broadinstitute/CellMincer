@@ -4,8 +4,14 @@ import torch
 import logging
 from typing import List, Tuple, Optional, Union, Dict
 
-from .ws import OptopatchBaseWorkspace, OptopatchDenoisingWorkspace
-from .utils import crop_center, get_nn_spatio_temporal_mean, pad_images_torch
+from .ws import \
+    OptopatchBaseWorkspace, \
+    OptopatchDenoisingWorkspace
+
+from .utils import \
+    crop_center, \
+    get_nn_spatio_temporal_mean, \
+    pad_images_torch
 
 from cellmincer import consts
 
@@ -59,7 +65,7 @@ def generate_occluded_training_data(
         occlusion_radius: int,
         occlusion_strategy: str,
         device: torch.device = consts.DEFAULT_DEVICE,
-        dtype: torch.dtype = consts.DEFAULT_DTYPE = torch.float32):
+        dtype: torch.dtype = consts.DEFAULT_DTYPE):
     """Generates minibatches with appropriate occlusion and padding for training a blind
     denoiser. Supports multiple datasets.
     

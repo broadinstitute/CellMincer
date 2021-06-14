@@ -1,9 +1,8 @@
 import numpy as np
 import torch
 from torch import nn
-from typing import List, Tuple, Dict
 
-import sys
+from typing import Tuple
 
 from cellmincer.util.ws import OptopatchBaseWorkspace, OptopatchDenoisingWorkspace
 
@@ -44,12 +43,9 @@ class DenoisingModel(nn.Module):
         
         raise NotImplementedError
 
-    '''
-    Computes the minimum xy-padding on the input tensor that the model needs.
-    '''
-    @staticmethod
-    def get_minimum_padding(
-            config: dict,
-            training_x_window: int,
-            training_y_window: int) -> Tuple[int, int]:
+    def get_best_input_size(
+            self,
+            output_min_lo: int,
+            output_min_hi: int) -> Tuple[int, int]:
+        
         raise NotImplementedError

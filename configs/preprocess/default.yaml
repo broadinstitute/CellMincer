@@ -57,6 +57,7 @@ detrend:
   poly_order: 1
   trend_model: polynomial
 device: cuda
+log_dir: /home/jupyter/bw-data/cellmincer/logs
 noise_estimation:
   n_bootstrap: 500
   plot_example: false
