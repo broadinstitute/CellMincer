@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import torch
 from torch import nn
@@ -73,7 +74,7 @@ class GUNet(nn.Module):
             self.down_path.append(
                 UNetConvBlock(
                     in_size=prev_channels + feature_channels,
-                    out_size=np.ceil(first_conv_channels * ch_growth_rate ** i),
+                    out_size=math.ceil(first_conv_channels * ch_growth_rate ** i),
                     pad=pad,
                     layer_norm=layer_norm,
                     norm_mode=norm_mode,
@@ -81,16 +82,16 @@ class GUNet(nn.Module):
                     kernel_size=unet_kernel_size,
                     n_conv_layers=n_conv_layers,
                     activation=activation))
-            prev_channels = np.ceil(first_conv_channels * ch_growth_rate ** i)
+            prev_channels = math.ceil(first_conv_channels * ch_growth_rate ** i)
 
         # upward path
         self.up_path = nn.ModuleList()        
         for i in reversed(range(depth - 1)):
             up_in_channels = prev_channels + noise_channels
-            up_bridge_channels = np.ceil(first_conv_channels * ch_growth_rate ** i) + feature_channels
-            up_mid_channels = np.ceil(first_conv_channels * ch_growth_rate ** i)
+            up_bridge_channels = math.ceil(first_conv_channels * ch_growth_rate ** i) + feature_channels
+            up_mid_channels = math.ceil(first_conv_channels * ch_growth_rate ** i)
             if i > 0:
-                up_out_channels = np.ceil(first_conv_channels * ch_growth_rate ** i)
+                up_out_channels = math.ceil(first_conv_channels * ch_growth_rate ** i)
             else:
                 up_out_channels = out_channels_before_readout
             
@@ -154,7 +155,7 @@ class GUNet(nn.Module):
 
         features_list = []
         block_list = []
-        for i, down_op in enumerate(self.down_path):            
+        for i, down_op in enumerate(self.down_path):
             x = torch.cat([features, x], - self.data_dim - 1)
             x = down_op(x)
             if i != len(self.down_path) - 1:
@@ -220,7 +221,6 @@ def get_unet_input_size(
     bottom_size = (output_min_size + pad) // ds + res
     input_size = bottom_size
     for i in range(depth - 1):
-        # TODO ??
         input_size = ds_rate * (input_size + delta)
     input_size += delta
     return input_size

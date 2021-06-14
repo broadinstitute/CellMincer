@@ -1,15 +1,17 @@
 import os
-import yaml
 import logging
 import pprint
 import time
-import math
-from abc import abstractmethod
+import json
 
+import matplotlib.pylab as plt
 import numpy as np
 import torch
+
 from scipy.signal import stft, istft
 from sklearn.linear_model import LinearRegression
+
+from abc import abstractmethod
 from typing import List, Tuple
 
 from cellmincer import consts
@@ -78,6 +80,8 @@ class Preprocess:
                 name=dataset['name'],
                 config_tag=self.params['tag'],
                 root_dir=self.params['root_data_dir'])
+            
+            logging.info(f'writing output to {data_dir}/')
 
             trend_sub_movie_txy = np.concatenate([
                 seg_txy - mu_txy

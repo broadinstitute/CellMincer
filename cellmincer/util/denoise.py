@@ -265,29 +265,32 @@ def get_noise2self_loss(
     
     assert reg_func in {'clamped_linear', 'tanh'}
     assert loss_type in {'lp', 'poisson_gaussian'}
-    
-    x_window = batch_data['x_window']
-    y_window = batch_data['y_window']
-    t_total = batch_data['padded_sliced_diff_movie_ntxy'].shape[1]
-    t_tandem = t_total - denoising_model.t_order
-    t_mid = (denoising_model.t_order - 1) // 2
-    total_pixels = x_window * y_window
 
     # iterate over the middle frames and accumulate loss
     def _compute_lp_loss(_err, _norm_p=norm_p, _scale=1.):
         return (_scale * (_err.abs() + eps).pow(_norm_p)).sum()
-            
+        
+    denoised_batch_ntxy = denoising_model(batch_data)
+    
+    x_window = min(batch_data['x_window'], denoised_batch_ntxy.shape[-2])
+    y_window = min(batch_data['y_window'], denoised_batch_ntxy.shape[-1])
+    total_pixels = x_window * y_window
+    
+    t_total = batch_data['padded_sliced_diff_movie_ntxy'].shape[1]
+    t_tandem = t_total - denoising_model.t_order
+    t_mid = (denoising_model.t_order - 1) // 2
+    
+    denoised_batch_ntxy = crop_center(
+        denoised_batch_ntxy,
+        target_width=x_window,
+        target_height=y_window)
+    
     # fetch and crop the dataset std (for regularization)
     if enable_continuity_reg:
         cropped_movie_t_std_nxy = crop_center(
             batch_data['padded_global_features_nfxy'][:, batch_data['detrended_std_feature_index'], ...],
             target_width=x_window,
             target_height=y_window)
-        
-    denoised_batch_ntxy = crop_center(
-        denoising_model(batch_data),
-        target_width=x_window,
-        target_height=y_window)
 
     reg_loss = None
     rec_loss = None

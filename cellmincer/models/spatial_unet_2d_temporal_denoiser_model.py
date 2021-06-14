@@ -11,7 +11,6 @@ from .components import \
 
 from .denoising_model import DenoisingModel
 
-from cellmincer.util.utils import crop_center
 from cellmincer.util.ws import OptopatchDenoisingWorkspace
 
 
@@ -82,8 +81,6 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
         
         n_batch, t_total = padded_sliced_diff_movie_ntxy.shape[:2]
         t_tandem = t_total - self.t_order
-        x_window = batch_data['x_window']
-        y_window = batch_data['y_window']
 
         cropped_unet_endpoint_nxy_list = []
         cropped_temporal_endpoint_nxy_list = []
@@ -100,10 +97,7 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
 
         # compute temporal-denoised convolutions for all t_order-length windows
         cropped_temporal_endpoint_ntxy = torch.stack([
-            crop_center(
-                self.temporal_denoiser(unet_features_nctxy[:, :, i_t:(i_t + self.t_order), :, :]),
-                target_width=x_window,
-                target_height=y_window)
+            self.temporal_denoiser(unet_features_nctxy[:, :, i_t:(i_t + self.t_order), :, :])
             for i_t in range(t_tandem + 1)], dim=1)
             
         return cropped_temporal_endpoint_ntxy
@@ -175,10 +169,8 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
                     self.spatial_unet(padded_sliced_movie_1txy))
                 unet_features_ncxy_list.append(unet_output['features_ncxy'])
 
-                denoised_movie_txy[i_t - t_begin] = crop_center(
-                    self.temporal_denoiser(torch.stack(unet_features_ncxy_list, dim=-3)),
-                    target_width=x_window,
-                    target_height=y_window)
+                denoised_movie_txy[i_t - t_begin] = \
+                    self.temporal_denoiser(torch.stack(unet_features_ncxy_list, dim=-3))
 
                 unet_features_ncxy_list.pop(0)
         

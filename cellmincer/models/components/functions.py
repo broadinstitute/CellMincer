@@ -1,6 +1,18 @@
 import torch
 from torch import nn
 
+__all__ = [
+    '_CONV_DICT',
+    '_BATCH_NORM_DICT',
+    '_CONV_TRANS_DICT',
+    '_AVG_POOL_DICT',
+    '_MAX_POOL_DICT',
+    '_REFLECTION_PAD_DICT',
+    '_CENTER_CROP_DICT',
+    '_ACTIVATION_DICT',
+    'activation_from_str'
+]
+
 def center_crop_1d(layer: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     _, _, layer_width = layer.size()
     _, _, target_width = target.size()

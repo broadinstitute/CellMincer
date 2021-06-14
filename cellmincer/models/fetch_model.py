@@ -1,7 +1,8 @@
 import numpy as np
 import torch
 from torch import nn
-from typing import List, Tuple, Dict
+
+import logging
 
 from .denoising_model import DenoisingModel
 
@@ -10,20 +11,20 @@ from .spatial_unet_2d_temporal_denoiser_model import SpatialUnet2dTemporalDenois
 
 
 # ...and add models to this lookup dictionary
-MODEL_DICT = {
+_MODEL_DICT = {
     'spatial-unet-2d-temporal-denoiser': SpatialUnet2dTemporalDenoiser
 }
 
 
-def initialize_model(
+def init_model(
         model_config: dict,
         model_state_path: str = None,
         device: torch.device = torch.device('cuda'),
         dtype: torch.dtype = torch.float32) -> DenoisingModel:
     try:
-        denoising_model = MODEL_DICT[model_config['type']](model_config, device, dtype)
+        denoising_model = _MODEL_DICT[model_config['type']](model_config, device, dtype)
     except KeyError:
-        print('Unrecognized model type; see recognized options:')
+        logging.warning('Unrecognized model type; see recognized options:')
         exit(0)
     if model_state_path is not None:
         denoising_model.load_state_dict(torch.load(model_state_path))
