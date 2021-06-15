@@ -1,33 +1,26 @@
+data_tag: ''
 datasets:
 - optosynth_first_wave__1__20__50
 device: cuda
 log_dir: /home/jupyter/bw-data/cellmincer/logs
 model:
-  spatial_unet_activation: relu
-  spatial_unet_batch_norm: false
-  spatial_unet_depth: 3
-  spatial_unet_first_conv_channels: 32
-  spatial_unet_kernel_size: 3
-  spatial_unet_n_conv_layers: 3
-  spatial_unet_padding: true
-  spatial_unet_readout_kernel_size: 1
-  temporal_denoiser_activation: relu
-  temporal_denoiser_conv_channels: 32
-  temporal_denoiser_hidden_dense_layer_dims:
-  - 32
-  - 32
-  temporal_denoiser_kernel_size: 5
-  temporal_denoiser_n_conv_layers: 3
-  type: spatial-unet-2d-temporal-denoiser
+  type: spatiotemporal-unet-3d
+  unet_activation: relu
+  unet_batch_norm: false
+  unet_depth: 3
+  unet_first_conv_channels: 32
+  unet_kernel_size: 3
+  unet_n_conv_layers: 3
+  unet_padding: true
+  unet_readout_kernel_size: 1
   use_attention: false
-  use_global_features: true
+  use_global_features: false
   use_layer_norm: false
   use_padding: false
+model_tag: ''
 root_data_dir: /home/jupyter/bw-data/cellmincer/data
-root_denoise_dir: /home/jupyter/bw-data/cellmincer/denoise
 root_model_dir: /home/jupyter/bw-data/cellmincer/models
 state_index: null
-tag: ''
 training:
   continuity_reg_strength: 1.0
   enable_continuity_reg: false

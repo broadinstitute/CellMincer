@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from torch import nn
 
+import logging
 from typing import Tuple
 
 from cellmincer.util.ws import OptopatchBaseWorkspace, OptopatchDenoisingWorkspace
@@ -15,10 +16,14 @@ class DenoisingModel(nn.Module):
             device: torch.device,
             dtype: torch.dtype):
         
-        assert t_order & 1 == 1
+        if t_order is None:
+            logging.warning('t_order assignment deferred; ensure this behavior is intended')
+            logging.info(f'name: {name}')
+        else:
+            assert t_order & 1 == 1
+            logging.info(f'name: {name} | t_order: {t_order}')
         
         super(DenoisingModel, self).__init__()
-        
         self.name = name
         self.t_order = t_order
         self.device = device

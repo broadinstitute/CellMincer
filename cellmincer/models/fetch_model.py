@@ -7,12 +7,16 @@ import logging
 from .denoising_model import DenoisingModel
 
 # import model subclasses here...
-from .spatial_unet_2d_temporal_denoiser_model import SpatialUnet2dTemporalDenoiser
+from .spatial_unet_2d_temporal_denoiser import SpatialUnet2dTemporalDenoiser
+from .spatial_unet_2d_multiframe import SpatialUnet2dMultiframe
+from .spatiotemporal_unet_3d import SpatiotemporalUnet3d
 
 
 # ...and add models to this lookup dictionary
 _MODEL_DICT = {
-    'spatial-unet-2d-temporal-denoiser': SpatialUnet2dTemporalDenoiser
+    'spatial-unet-2d-temporal-denoiser': SpatialUnet2dTemporalDenoiser,
+    'spatial-unet-2d-multiframe': SpatialUnet2dMultiframe,
+    'spatiotemporal-unet-3d': SpatiotemporalUnet3d
 }
 
 

@@ -58,5 +58,4 @@ class CLI(AbstractCLI):
         logging.info('Command:\n' + ' '.join(['cellmincer', 'preprocess'] + sys.argv[2:]))
                                       
         # preprocess
-        preprocess = Preprocess(params)
-        preprocess.run()
+        Preprocess(params).run()

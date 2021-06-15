@@ -15,7 +15,8 @@ import importlib
 TOOL_NAME_LIST = [
     'preprocess',
     'features',
-    'run'
+    'train',
+    'denoise'
 ]
 
 

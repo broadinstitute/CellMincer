@@ -79,11 +79,8 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
         if self.use_global_features:
             padded_global_features_nfxy = batch_data['padded_global_features_nfxy']
         
-        n_batch, t_total = padded_sliced_diff_movie_ntxy.shape[:2]
+        t_total = padded_sliced_diff_movie_ntxy.shape[2]
         t_tandem = t_total - self.t_order
-
-        cropped_unet_endpoint_nxy_list = []
-        cropped_temporal_endpoint_nxy_list = []
 
         # calculate processed features
         unet_output_list = [(
@@ -93,16 +90,15 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
                 if self.use_global_features else
                 self.spatial_unet(padded_sliced_diff_movie_ntxy[:, i_t:i_t+1, :, :]))
             for i_t in range(t_total)]
-        unet_features_nctxy = torch.stack([output['features_ncxy'] for output in unet_output_list], dim=-3)
+        unet_features_nctxy = torch.stack([output['features'] for output in unet_output_list], dim=-3)
 
         # compute temporal-denoised convolutions for all t_order-length windows
-        cropped_temporal_endpoint_ntxy = torch.stack([
+        temporal_endpoint_ntxy = torch.stack([
             self.temporal_denoiser(unet_features_nctxy[:, :, i_t:(i_t + self.t_order), :, :])
             for i_t in range(t_tandem + 1)], dim=1)
             
-        return cropped_temporal_endpoint_ntxy
+        return temporal_endpoint_ntxy
     
-    # TODO modify to use out-of-time-window frames for denoising if they exist
     def denoise_movie(
             self,
             ws_denoising: OptopatchDenoisingWorkspace,
@@ -126,8 +122,12 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
         assert 0 <= x0 <= x0 + x_window <= ws_denoising.width
         assert 0 <= y0 <= y0 + y_window <= ws_denoising.height
         
-        denoised_movie_txy = torch.empty(t_end - t_begin, x_window, y_window, device='cpu')
+        n_frames = ws_denoising.n_frames
+        t_mid = (self.t_order - 1) // 2
+        mid_frame_begin = max(t_begin, t_mid)
+        mid_frame_end = min(t_end, n_frames - t_mid)
         
+        denoised_movie_txy_list = []
         unet_features_ncxy_list = []
         
         if self.use_global_features:
@@ -138,7 +138,7 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
                 y_window=y_window)
         
         with torch.no_grad():
-            for i_t in range(t_begin, t_begin + self.t_order - 1):
+            for i_t in range(mid_frame_begin - t_mid, mid_frame_begin + t_mid):
                 padded_sliced_movie_1txy = ws_denoising.get_movie_slice(
                     t_begin_index=i_t,
                     t_end_index=i_t + 1,
@@ -149,12 +149,11 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
 
                 unet_output = (
                     self.spatial_unet(padded_sliced_movie_1txy, padded_global_features_1fxy)
-                    if self.use_global_features else
-                    self.spatial_unet(padded_sliced_movie_1txy))
-                unet_features_ncxy_list.append(unet_output['features_ncxy'])
+                        if self.use_global_features else
+                        self.spatial_unet(padded_sliced_movie_1txy))
+                unet_features_ncxy_list.append(unet_output['features'])
 
-            t_mid = (self.t_order - 1) // 2
-            for i_t in range(t_begin + t_mid, t_end - t_mid):
+            for i_t in range(mid_frame_begin, mid_frame_end):
                 padded_sliced_movie_1txy = ws_denoising.get_movie_slice(
                     t_begin_index=i_t + t_mid,
                     t_end_index=i_t + t_mid + 1,
@@ -167,15 +166,22 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
                     self.spatial_unet(padded_sliced_movie_1txy, padded_global_features_1fxy)
                     if self.use_global_features else
                     self.spatial_unet(padded_sliced_movie_1txy))
-                unet_features_ncxy_list.append(unet_output['features_ncxy'])
+                unet_features_ncxy_list.append(unet_output['features'])
 
-                denoised_movie_txy[i_t - t_begin] = \
-                    self.temporal_denoiser(torch.stack(unet_features_ncxy_list, dim=-3))
+                denoised_movie_txy_list.append(
+                    self.temporal_denoiser(torch.stack(unet_features_ncxy_list, dim=-3)).cpu())
 
                 unet_features_ncxy_list.pop(0)
         
-        denoised_movie_txy[:t_mid] = denoised_movie_txy[t_mid]
-        denoised_movie_txy[-t_mid:] = denoised_movie_txy[-t_mid - 1]
+        # fill in edge frames with the ends of the middle frame interval
+        denoised_movie_txy_full_list = \
+            [denoised_movie_txy_list[0] for i in range(mid_frame_begin - t_begin)] + \
+            denoised_movie_txy_list + \
+            [denoised_movie_txy_list[-1] for i in range(t_end - mid_frame_end)]
+        
+        denoised_movie_txy = torch.cat(denoised_movie_txy_full_list, dim=0)
+        return denoised_movie_txy
+        
 
     def get_best_input_size(
             self,

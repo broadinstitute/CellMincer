@@ -174,8 +174,8 @@ class GUNet(nn.Module):
             x = up_op(x, bridge)
             
         return {
-            'features_ncxy': x,
-            'readout_ncxy': self.final_trans(self.readout(x))
+            'features': x,
+            'readout': self.final_trans(self.readout(x))
         }
     
     def _forward_wo_features(self, x: torch.Tensor) \
