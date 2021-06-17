@@ -10,10 +10,9 @@ import matplotlib.pylab as plt
 import numpy as np
 import torch
 
-from cellmincer import consts
-from cellmincer.util import OptopatchBaseWorkspace, OptopatchGlobalFeatureExtractor, get_tagged_dir
+from cellmincer.util import OptopatchBaseWorkspace, OptopatchGlobalFeatureExtractor, consts
 
-class Features:
+class Feature:
     def __init__(
             self,
             params: dict):
@@ -24,11 +23,7 @@ class Features:
     
         # load datasets
         datasets = self.params['datasets']
-        dataset_dirs = [get_tagged_dir(
-                name=dataset,
-                config_tag=self.params['tag'],
-                root_dir=self.params['root_data_dir'])
-            for dataset in datasets]
+        dataset_dirs = [os.path.join(self.params['root_data_dir'], dataset) for dataset in datasets]
 
         assert all([os.path.exists(dataset_dir) for dataset_dir in dataset_dirs])
 

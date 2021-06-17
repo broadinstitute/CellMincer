@@ -3,7 +3,7 @@ datasets:
 device: cuda
 log_dir: /home/jupyter/bw-data/cellmincer/logs
 model:
-  type: spatiotemporal-unet-3d
+  type: spatial-unet-2d-multiframe
   unet_activation: relu
   unet_batch_norm: false
   unet_depth: 3
@@ -13,7 +13,7 @@ model:
   unet_padding: true
   unet_readout_kernel_size: 1
   use_attention: false
-  use_global_features: false
+  use_global_features: true
   use_layer_norm: false
   use_padding: false
 root_data_dir: /home/jupyter/bw-data/cellmincer/data
@@ -28,7 +28,7 @@ training:
     type: const
   n_batch_per_loop: 20
   n_batch_validation: 20
-  n_iters: 180000
+  n_iters: 100000
   n_loop: 1
   noise_threshold_to_std: 0.05
   norm_p: 1
@@ -41,7 +41,8 @@ training:
   output_min_size_hi: 64
   output_min_size_lo: 10
   reg_func: clamped_linear
-  save_every: 2000
+  save_every: 10000
+  t_order: 13
   t_tandem: 0
   validate_every: 100
   weight_decay: 0.1

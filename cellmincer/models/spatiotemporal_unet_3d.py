@@ -68,7 +68,7 @@ class SpatiotemporalUnet3d(DenoisingModel):
         if self.use_global_features:
             padded_global_features_nfxy = batch_data['padded_global_features_nfxy']
         
-        t_total = padded_sliced_diff_movie_nctxy.shape[2]
+        t_total = padded_sliced_diff_movie_nctxy.shape[1]
         t_tandem = t_total - self.t_order
 
         # calculate processed features

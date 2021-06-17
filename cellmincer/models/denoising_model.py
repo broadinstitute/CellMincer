@@ -48,9 +48,13 @@ class DenoisingModel(nn.Module):
         
         raise NotImplementedError
 
+    '''
+    Computes the input and output size with maximal out/in ratio
+    constrained by the range of output sizes.
+    '''
     def get_best_input_size(
             self,
-            output_min_lo: int,
-            output_min_hi: int) -> Tuple[int, int]:
+            output_lo: int,
+            output_hi: int) -> Tuple[int, int, int, int]:
         
         raise NotImplementedError

@@ -7,4 +7,3 @@ datasets:
 device: cpu
 log_dir: /home/jupyter/bw-data/cellmincer/logs
 root_data_dir: /home/jupyter/bw-data/cellmincer/data
-tag: ''

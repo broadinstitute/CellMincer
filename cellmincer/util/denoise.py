@@ -1,8 +1,13 @@
+import os
+
 import numpy as np
 from skimage.filters import threshold_otsu
 import torch
 import logging
 from typing import List, Tuple, Optional, Union, Dict
+
+from torch.optim.lr_scheduler import LambdaLR
+from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 
 from .ws import \
     OptopatchBaseWorkspace, \
@@ -13,8 +18,7 @@ from .utils import \
     get_nn_spatio_temporal_mean, \
     pad_images_torch
 
-from cellmincer import consts
-
+from . import consts
 
 def generate_bernoulli_mask(
         p: float,
@@ -28,32 +32,37 @@ def generate_bernoulli_mask(
         [n_batch, width, height]).type(dtype)
 
 
-def generate_bernoulli_mask_on_mask(
-        p: float,
-        in_mask: torch.Tensor,
-        device: torch.device = consts.DEFAULT_DEVICE,
-        dtype: torch.dtype = consts.DEFAULT_DTYPE) -> torch.Tensor:
-    out_mask = torch.zeros(in_mask.shape, device=device, dtype=dtype)
-    active_pixels = in_mask.sum()
-    bern = torch.distributions.Bernoulli(
-        probs=torch.tensor(p, device=device, dtype=dtype)).sample(
-        [active_pixels.item()]).type(dtype)
-    out_mask[in_mask] = bern
-    return out_mask
-
-
-def inflate_binary_mask(mask_ncxy: torch.Tensor, radius: int):
+def inflate_binary_mask(mask_mxy: torch.Tensor, radius: int):
     assert radius >= 0
     if radius == 0:
-        return mask_ncxy
-    device = mask_ncxy.device
+        return mask_mxy
+    device = mask_mxy.device
     x = torch.arange(-radius, radius + 1, dtype=torch.float, device=device)[None, :]
     y = torch.arange(-radius, radius + 1, dtype=torch.float, device=device)[:, None]
     struct = ((x.pow(2) + y.pow(2)) <= (radius ** 2)).float()
     kern = struct[None, None, ...]
-    return (torch.nn.functional.conv2d(mask_ncxy, kern, padding=radius) > 0).type(mask_ncxy.dtype)
+    return (torch.nn.functional.conv2d(mask_mxy.unsqueeze(dim=1), kern, padding=radius) > 0).squeeze(dim=1).type(mask_mxy.dtype)
 
+
+def generate_batch_indices(
+        ws_denoising_list: List[OptopatchDenoisingWorkspace],
+        n_batch: int,
+        t_mid: int,
+        dataset_selection: str):
     
+    assert dataset_selection in {'random', 'balanced'}
+    
+    if dataset_selection == 'random':
+        dataset_indices = np.random.randint(0, len(ws_denoising_list), size=n_batch)
+    elif dataset_selection == 'balanced':
+        dataset_indices = np.arange(n_batch) % len(ws_denoising_list)
+
+    n_frame_array = np.array([ws_denoising.n_frames for ws_denoising in ws_denoising_list])
+    frame_indices = np.random.randint(t_mid, n_frame_array[dataset_indices] - t_mid)
+    
+    return dataset_indices, frame_indices
+
+
 def generate_occluded_training_data(
         ws_denoising_list: List[OptopatchDenoisingWorkspace],
         t_order: int,
@@ -64,6 +73,8 @@ def generate_occluded_training_data(
         occlusion_prob: float,
         occlusion_radius: int,
         occlusion_strategy: str,
+        dataset_indices: np.ndarray = None,
+        frame_indices: np.ndarray = None,
         device: torch.device = consts.DEFAULT_DEVICE,
         dtype: torch.dtype = consts.DEFAULT_DTYPE):
     """Generates minibatches with appropriate occlusion and padding for training a blind
@@ -81,7 +92,7 @@ def generate_occluded_training_data(
     
     assert t_order % 2 == 1
     assert t_tandem % 2 == 0
-    assert occlusion_strategy in {'random', 'nn-average'}
+    assert occlusion_strategy in {'random', 'nn-average', 'validation'}
     
     padded_x_window = x_window + 2 * ws_denoising_list[0].x_padding
     padded_y_window = y_window + 2 * ws_denoising_list[0].y_padding
@@ -89,29 +100,32 @@ def generate_occluded_training_data(
     n_datasets = len(ws_denoising_list)
     n_global_features = ws_denoising_list[0].n_global_features
     t_total = t_order + t_tandem
-    t_mid = (t_total - 1) // 2
+    
+    tandem_start = t_order // 2
+    tandem_end = tandem_start + t_tandem + 1
+    t_mid = t_total // 2
+    
     trend_mean_feature_index = ws_denoising_list[0].cached_features.get_feature_index('trend_mean_0')
     detrended_std_feature_index = ws_denoising_list[0].cached_features.get_feature_index('detrended_std_0')
     
-    # sample random dataset indices
-    dataset_indices = np.random.randint(0, n_datasets, size=n_batch)
+    n_frame_array = np.array([ws_denoising.n_frames for ws_denoising in ws_denoising_list])
+    width_array = np.array([ws_denoising.width for ws_denoising in ws_denoising_list])
+    height_array = np.array([ws_denoising.height for ws_denoising in ws_denoising_list])
+    
+    if occlusion_strategy != 'validation':
+        # random dataset sampling and time slices
+        dataset_indices, frame_indices = generate_batch_indices(
+            ws_denoising_list,
+            n_batch=n_batch,
+            t_mid=t_mid,
+            dataset_selection='random')
 
-    # random time slices
-    time_slice_locs = np.random.rand(n_batch)
-    t_begin_indices = [
-        int(np.floor((ws_denoising_list[i_dataset].n_frames - t_total) * loc))
-        for i_dataset, loc in zip(dataset_indices, time_slice_locs)]
-    t_end_indices = [
-        int(np.floor((ws_denoising_list[i_dataset].n_frames - t_total) * loc)) + t_total
-        for i_dataset, loc in zip(dataset_indices, time_slice_locs)]
+    t_begin_indices = frame_indices - t_mid
+    t_end_indices = frame_indices + t_mid + 1
     
     # random space slices
-    x0_list = [
-        np.random.randint(0, ws_denoising_list[i_dataset].width - x_window + 1)
-        for i_dataset in dataset_indices]
-    y0_list = [
-        np.random.randint(0, ws_denoising_list[i_dataset].height - y_window + 1)
-        for i_dataset in dataset_indices]
+    x0_list = np.random.randint(0, width_array[dataset_indices] - x_window + 1)
+    y0_list = np.random.randint(0, height_array[dataset_indices] - y_window + 1)
         
     # generate a uniform bernoulli mask
     n_total_masks = n_batch * (t_tandem + 1)
@@ -123,11 +137,11 @@ def generate_occluded_training_data(
         device=device,
         dtype=dtype)
     inflated_occlusion_masks_mxy = inflate_binary_mask(
-        occlusion_masks_mxy[:, None, :, :], occlusion_radius)
+        occlusion_masks_mxy, occlusion_radius)
     occlusion_masks_ntxy = occlusion_masks_mxy.view(
         n_batch, t_tandem + 1, x_window, y_window)    
     inflated_occlusion_masks_ntxy = inflated_occlusion_masks_mxy.view(
-        n_batch, t_tandem + 1, x_window, y_window)    
+        n_batch, t_tandem + 1, x_window, y_window)
     
     # slice the movies (w/ padding)
     movie_slice_dict_list = [
@@ -158,7 +172,7 @@ def generate_occluded_training_data(
 
     # make a hard copy of the to-be-occluded frames
     padded_middle_frames_ntxy = padded_sliced_diff_movie_ntxy[
-        :, (t_mid - (t_tandem // 2)):(t_mid + (t_tandem // 2) + 1), ...].clone()
+        :, tandem_start:tandem_end, ...].clone()
     
     # pad the mask with zeros to match the padded movie
     padded_occlusion_masks_ntxy = pad_images_torch(
@@ -174,32 +188,34 @@ def generate_occluded_training_data(
         pad_value_nc=torch.zeros(n_batch, t_tandem + 1, device=device, dtype=dtype))
     
     if occlusion_strategy == 'nn-average':
-        
         padded_sliced_diff_movie_ntxy[
-            :, (t_mid - (t_tandem // 2)):(t_mid + (t_tandem // 2) + 1), :, :] *= (
+            :, tandem_start:tandem_end, :, :] *= (
                 1 - padded_inflated_occlusion_masks_ntxy)
         
         for i_t in range(t_tandem + 1):
-            padded_sliced_diff_movie_ntxy[:, t_mid - (t_tandem // 2) + i_t, 1:-1, 1:-1] += (
+            padded_sliced_diff_movie_ntxy[:, tandem_start + i_t, 1:-1, 1:-1] += (
                 padded_inflated_occlusion_masks_ntxy[:, i_t, 1:-1, 1:-1]
                 * get_nn_spatio_temporal_mean(
-                    padded_sliced_diff_movie_ntxy, t_mid - (t_tandem // 2) + i_t))
+                    padded_sliced_diff_movie_ntxy, tandem_start + i_t))
     
     elif occlusion_strategy == 'random':
-
         padded_sliced_diff_movie_ntxy[
-            :, (t_mid - (t_tandem // 2)):(t_mid + (t_tandem // 2) + 1), :, :] = (
+            :, tandem_start:tandem_end, :, :] = (
                 (1 - padded_inflated_occlusion_masks_ntxy) * padded_sliced_diff_movie_ntxy[
-                    :, (t_mid - (t_tandem // 2)):(t_mid + (t_tandem // 2) + 1), :, :]
+                    :, tandem_start:tandem_end, :, :]
                 + padded_inflated_occlusion_masks_ntxy * torch.distributions.Normal(
                     loc=padded_global_features_nfxy[:, trend_mean_feature_index, :, :][:, None, ...].expand(
                         n_batch, t_tandem + 1, padded_x_window, padded_y_window),
                     scale=padded_global_features_nfxy[:, detrended_std_feature_index, :, :][:, None, ...].expand(
                         n_batch, t_tandem + 1, padded_x_window, padded_y_window)).sample())
-    
+
+    elif occlusion_strategy == 'validation':
+        # no occlusion when validating
+        pass
+
     else:
-            
-        raise ValueError("Unknown occlusion strategy; valid options: 'nn-average', 'random'")
+        raise ValueError(f"Unknown occlusion strategy {occlusion_strategy}; options are 'random', 'nn-average', 'validation'")
+
                 
     return {
         'dataset_indices': dataset_indices,
@@ -237,7 +253,7 @@ def get_total_variation(
             dt_frame_ntxy / ((eps + noise_std_ntxy) * eta))
     else:
         raise ValueError(
-            f"Unknown reg_func value ({reg_func}); valid options are: 'clamped_linear', 'tanh'")        
+            f"Unknown reg_func value ({reg_func}); options are: 'clamped_linear', 'tanh'")        
         
 
 def get_poisson_gaussian_nll(
@@ -346,6 +362,65 @@ def get_noise2self_loss(
         reg_loss = _compute_lp_loss(
             _err=total_variation_ntxy,
             _norm_p=norm_p,
-            _scale=continuity_reg_strength / ((t_tandem - 1) * total_pixels)) # TODO ask mehrtash abou this term
+            _scale=continuity_reg_strength / ((t_tandem - 1) * total_pixels)) # TODO ask mehrtash about this term
             
     return {'rec_loss': rec_loss, 'reg_loss': reg_loss}
+
+
+def generate_optimizer(denoising_model, optim_params: dict, lr: float):
+    if optim_params['type'] == 'adam':
+        optim = torch.optim.AdamW(
+            denoising_model.parameters(),
+            lr=lr,
+            betas=(optim_params['beta_lo'], optim_params['beta_hi']),
+            weight_decay=optim_params['weight_decay'])
+    elif optim_params['type'] == 'sgd':
+        optim = torch.optim.SGD(denoising_model.parameters(), lr=lr, momentum=optim_params['momentum'])
+    else:
+        logging.error('unrecognized optimizer type')
+        raise ValueError('Unrecognized optimizer type.')
+    return optim
+
+
+def generate_lr_scheduler(
+        optim: torch.optim.Optimizer,
+        lr_params: dict,
+        n_iters: int):
+    if lr_params['type'] == 'const':
+        sched = LambdaLR(optim, lr_lambda=lambda it: 1)
+    elif lr_params['type'] == 'cosine-annealing-warmup':
+        sched = CosineAnnealingWarmupRestarts(
+            optim=optim,
+            first_cycle_steps=n_iters,
+            cycle_mult=1.0,
+            max_lr=lr_params['max'],
+            min_lr=lr_params['min'],
+            warmup_steps=int(n_iters * lr_params['warmup']),
+            gamma=1.0)
+    else:
+        logging.error('unrecognized scheduler type')
+        raise ValueError('Unrecognized scheduler type.')
+    return sched
+
+
+def save_model_state(
+        denoising_model,
+        model_dir: str,
+        index: int,
+        optim = None,
+        sched = None,
+        save_train_state: bool = False):
+    model_ckpt_dir = os.path.join(model_dir, f'{index:06d}')
+    if not os.path.exists(model_ckpt_dir):
+        os.mkdir(model_ckpt_dir)
+
+    torch.save(
+        denoising_model.state_dict(),
+        os.path.join(model_ckpt_dir, 'model_state.pt'))
+    if save_train_state:
+        torch.save(
+            optim.state_dict(),
+            os.path.join(model_ckpt_dir, 'optim_state.pt'))
+        torch.save(
+            sched.state_dict(),
+            os.path.join(model_ckpt_dir, 'sched_state.pt'))

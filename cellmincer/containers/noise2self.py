@@ -10,12 +10,11 @@ import numpy as np
 import torch
 from typing import List, Tuple
 
-from cellmincer import consts
 from cellmincer.models import DenoisingModel, init_model
 from cellmincer.util import \
     OptopatchBaseWorkspace, \
     OptopatchDenoisingWorkspace, \
-    get_tagged_dir
+    consts
 
 
 class Noise2Self:
@@ -27,11 +26,7 @@ class Noise2Self:
     def load_datasets(self) -> List[OptopatchDenoisingWorkspace]:
         logging.info('Loading datasets...')
         datasets = self.params['datasets']
-        dataset_dirs = [get_tagged_dir(
-                name=dataset,
-                config_tag=self.params['data_tag'],
-                root_dir=self.params['root_data_dir'])
-            for dataset in datasets]
+        dataset_dirs = [os.path.join(self.params['root_data_dir'], dataset) for dataset in datasets]
 
         assert all([os.path.exists(dataset_dir) for dataset_dir in dataset_dirs])
 
@@ -71,24 +66,21 @@ class Noise2Self:
         n_global_features: int) -> DenoisingModel:
     
         self.params['model']['n_global_features'] = n_global_features
-        model_dir = get_tagged_dir(
-            name=self.params['model']['type'],
-            config_tag=self.params['model_tag'],
-            root_dir=self.params['root_model_dir'])
+        model_dir = os.path.join(self.params['root_model_dir'], self.params['model']['type'])
 
-        if self.params['state_index'] is None:
-            denoising_model = init_model(
-                self.params['model'],
-                device=self.params['device'],
-                dtype=consts.DEFAULT_DTYPE)
-        else:
+        if 'state_index' in self.params:
             model_state_path = os.path.join(model_dir, f'{self.params["state_index"]:06d}', 'model_state.pt')
             denoising_model = init_model(
                 self.params['model'],
                 model_state_path=model_state_path,
                 device=self.params['device'],
                 dtype=consts.DEFAULT_DTYPE)
-    
+        else:
+            denoising_model = init_model(
+                self.params['model'],
+                device=self.params['device'],
+                dtype=consts.DEFAULT_DTYPE)
+
         return denoising_model
 
     def get_resources(self) -> Tuple[List[OptopatchDenoisingWorkspace], DenoisingModel]:

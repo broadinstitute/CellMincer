@@ -14,14 +14,12 @@ from typing import List
 from torch.optim.lr_scheduler import LambdaLR
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 
-from cellmincer import consts
 from cellmincer.containers import Noise2Self
 from cellmincer.models import DenoisingModel
 from cellmincer.util import \
     OptopatchBaseWorkspace, \
     OptopatchDenoisingWorkspace, \
-    crop_center, \
-    get_tagged_dir
+    crop_center
     
 class Denoise:
     def __init__(
@@ -32,10 +30,7 @@ class Denoise:
         self.ws_denoising_list, self.denoising_model = Noise2Self(params).get_resources()
     
     def run(self):
-        denoise_dir = get_tagged_dir(
-            name=self.params['model']['type'],
-            config_tag=self.params['model_tag'],
-            root_dir=self.params['root_denoise_dir'])
+        denoise_dir = os.path.join(self.params['root_denoise_dir'], self.params['model']['type'])
 
         if not os.path.exists(denoise_dir):
             os.mkdir(denoise_dir)

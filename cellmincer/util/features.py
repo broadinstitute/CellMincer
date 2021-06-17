@@ -8,7 +8,7 @@ from scipy.signal import find_peaks
 
 from .utils import crop_center
 
-from cellmincer import consts
+from . import consts
 
 
 @dataclass

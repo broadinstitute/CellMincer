@@ -79,7 +79,7 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
         if self.use_global_features:
             padded_global_features_nfxy = batch_data['padded_global_features_nfxy']
         
-        t_total = padded_sliced_diff_movie_ntxy.shape[2]
+        t_total = padded_sliced_diff_movie_ntxy.shape[1]
         t_tandem = t_total - self.t_order
 
         # calculate processed features
@@ -91,7 +91,6 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
                 self.spatial_unet(padded_sliced_diff_movie_ntxy[:, i_t:i_t+1, :, :]))
             for i_t in range(t_total)]
         unet_features_nctxy = torch.stack([output['features'] for output in unet_output_list], dim=-3)
-
         # compute temporal-denoised convolutions for all t_order-length windows
         temporal_endpoint_ntxy = torch.stack([
             self.temporal_denoiser(unet_features_nctxy[:, :, i_t:(i_t + self.t_order), :, :])
@@ -183,9 +182,13 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
         return denoised_movie_txy
         
 
+    '''
+    Returns the xy window dimensions and padding dimensions with maximal output/input area ratio.
+    '''
     def get_best_input_size(
             self,
             output_min_size_lo: int,
             output_min_size_hi: int) -> Tuple[int, int]:
-        input_size = get_best_gunet_input_size(self.spatial_unet, output_min_size_lo, output_min_size_hi)
-        return input_size, input_size
+        input_size, output_size = get_best_gunet_input_size(self.spatial_unet, output_min_size_lo, output_min_size_hi)
+        padding = (input_size - output_size) // 2
+        return output_size, output_size, padding, padding

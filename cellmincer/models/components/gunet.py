@@ -226,14 +226,20 @@ def get_unet_input_size(
     return input_size
 
 
+# TODO rename?
 def get_best_gunet_input_size(
         gunet: GUNet,
         output_min_size_lo: int,
         output_min_size_hi: int) -> int:
-    """Determines the best input size for an unpadded U-Net such that it does not
-    lead to aliasing AND it yields the highest output to input area ratio."""
+    '''
+    Determines the best input size for an unpadded U-Net such that it does not
+    lead to aliasing AND it yields the highest output to input area ratio.
+    
+    Returns the corresponding input and output dimensions.
+    '''
 
     input_size_list = []
+    output_size_list = []
     output_pixels_to_input_pixels_list = []
     for output_min_size in range(output_min_size_lo, output_min_size_hi + 1):
         input_size = get_unet_input_size(
@@ -244,4 +250,7 @@ def get_best_gunet_input_size(
             ds_rate=gunet.ds_rate)
         output_pixels_to_input_pixels_list.append(output_min_size / input_size)
         input_size_list.append(input_size)
-    return input_size_list[np.argmax(output_pixels_to_input_pixels_list)]
+        output_size_list.append(output_min_size)
+        
+    best = np.argmax(output_pixels_to_input_pixels_list)
+    return input_size_list[best], output_size_list[best]

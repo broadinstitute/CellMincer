@@ -14,8 +14,7 @@ from sklearn.linear_model import LinearRegression
 from abc import abstractmethod
 from typing import List, Tuple
 
-from cellmincer import consts
-from cellmincer.util import OptopatchBaseWorkspace, get_tagged_dir
+from cellmincer.util import OptopatchBaseWorkspace, consts
 
 class Preprocess:
     def __init__(
@@ -32,10 +31,7 @@ class Preprocess:
         logging.info('Creating data directories...')
         for i_dataset, dataset in enumerate(datasets):
             # appends config tag to data directory if tag exists
-            data_dir = get_tagged_dir(
-                name=dataset['name'],
-                config_tag=self.params['tag'],
-                root_dir=self.params['root_data_dir'])
+            data_dir = os.path.join(self.params['root_data_dir'], dataset['name'])
             if not os.path.exists(data_dir):
                 os.mkdir(data_dir)
             logging.info(f'({i_dataset + 1}/{len(datasets)}) {data_dir}')
@@ -76,10 +72,7 @@ class Preprocess:
                 device=self.params['device'])
 
             # save results to data directory
-            data_dir = get_tagged_dir(
-                name=dataset['name'],
-                config_tag=self.params['tag'],
-                root_dir=self.params['root_data_dir'])
+            data_dir = os.path.join(self.params['root_data_dir'], dataset['name'])
             
             logging.info(f'writing output to {data_dir}/')
 

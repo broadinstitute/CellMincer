@@ -8,7 +8,7 @@ from typing import List, Tuple, Optional, Dict
 from .utils import get_cosine_similarity_with_sequence_np
 from .features import OptopatchGlobalFeatureContainer
 
-from cellmincer import consts
+from . import consts
 
 
 class OptopatchBaseWorkspace:

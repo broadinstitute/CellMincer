@@ -249,11 +249,3 @@ def rolling_circle_filter_torch(
         y_bg[:, i_x] = y_center[batch_ravel, indices] + radius_y
     
     return y_bg.reshape(batch_shape + (n_points,))
-
-
-def get_tagged_dir(
-        name: str,
-        config_tag: str,
-        root_dir: str):
-    return os.path.join(root_dir, '__'.join([name, config_tag]) if config_tag else name)
-

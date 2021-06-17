@@ -3,17 +3,24 @@ datasets:
 device: cuda
 log_dir: /home/jupyter/bw-data/cellmincer/logs
 model:
-  type: spatiotemporal-unet-3d
-  unet_activation: relu
-  unet_batch_norm: false
-  unet_depth: 3
-  unet_first_conv_channels: 32
-  unet_kernel_size: 3
-  unet_n_conv_layers: 3
-  unet_padding: true
-  unet_readout_kernel_size: 1
+  spatial_unet_activation: relu
+  spatial_unet_batch_norm: false
+  spatial_unet_depth: 3
+  spatial_unet_first_conv_channels: 32
+  spatial_unet_kernel_size: 3
+  spatial_unet_n_conv_layers: 3
+  spatial_unet_padding: true
+  spatial_unet_readout_kernel_size: 1
+  temporal_denoiser_activation: relu
+  temporal_denoiser_conv_channels: 32
+  temporal_denoiser_hidden_dense_layer_dims:
+  - 32
+  - 32
+  temporal_denoiser_kernel_size: 5
+  temporal_denoiser_n_conv_layers: 3
+  type: spatial-unet-2d-temporal-denoiser
   use_attention: false
-  use_global_features: false
+  use_global_features: true
   use_layer_norm: false
   use_padding: false
 root_data_dir: /home/jupyter/bw-data/cellmincer/data
@@ -24,24 +31,25 @@ training:
   log_every: 100
   loss_type: lp
   lr_params:
-    max: 0.0001
+    max: 5.0e-05
     type: const
   n_batch_per_loop: 20
   n_batch_validation: 20
-  n_iters: 180000
+  n_iters: 100000
   n_loop: 1
   noise_threshold_to_std: 0.05
-  norm_p: 1
+  norm_p: 2
   occlusion_prob: 0.05
   occlusion_radius: 0
   occlusion_strategy: random
   optim_params:
-    momentum: 0.9
-    type: sgd
+    beta_hi: 0.999
+    beta_lo: 0.9
+    type: adam
+    weight_decay: 0.1
   output_min_size_hi: 64
   output_min_size_lo: 10
   reg_func: clamped_linear
-  save_every: 2000
+  save_every: 10000
   t_tandem: 0
   validate_every: 100
-  weight_decay: 0.1

@@ -64,7 +64,6 @@ noise_estimation:
   plot_subsample: 1000
   stationarity_window: 10
 root_data_dir: /home/jupyter/bw-data/cellmincer/data
-tag: ''
 trim:
   n_frames_fit_left: 100
   n_frames_fit_right: 250
