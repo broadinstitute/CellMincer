@@ -23,7 +23,7 @@ install_requires = [
 ]
 
 dependency_links = [
-    'https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup/tarball/master/#egg=cosine_annealing_warmup-2.0'
+    'https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup/tarball/master#egg=cosine_annealing_warmup'
 ]
 
 setuptools.setup(
@@ -39,10 +39,11 @@ setuptools.setup(
       'Topic :: Scientific/Engineering',
     ],
     url='http://github.com/broadinstitute/CellMincer',
-    author='Mehrtash Babadi',
+    author='Brice Wang, Mehrtash Babadi',
     license='BSD (3-Clause)',
     packages=['cellmincer'],
     install_requires=install_requires,
+    dependency_links=dependency_links,
     entry_points={
         'console_scripts': ['cellmincer=cellmincer.cli.base_cli:main'],
     },

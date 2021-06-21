@@ -4,4 +4,4 @@ scipy
 torch
 boltons
 pyyaml
-cosine_annealing_warmup==2.0
+cosine_annealing_warmup

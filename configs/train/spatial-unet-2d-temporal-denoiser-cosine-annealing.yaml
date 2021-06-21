@@ -38,7 +38,7 @@ training:
   n_batch_per_loop: 20
   n_batch_validation: 10
   n_frames_validation: 200
-  n_iters: 100000
+  n_iters: 200000
   n_loop: 1
   noise_threshold_to_std: 0.05
   norm_p: 2
