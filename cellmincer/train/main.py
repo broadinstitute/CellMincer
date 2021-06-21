@@ -216,7 +216,8 @@ class Train:
                 update_time = True
                 logging.info(
                     f'iter {i_iter + 1}/{n_iters} | '
-                    f'val loss={last_val_loss:.1f} | '
+                    f'train loss={total_loss_hist[-1]:.4f} | '
+                    f'val loss={last_val_loss:.4f} | '
                     f'{training_config["log_every"] / elapsed:.2f} iter/s')
 
             if (i_iter + 1) % training_config['save_every'] == 0:
