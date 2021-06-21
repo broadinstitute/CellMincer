@@ -31,8 +31,10 @@ training:
   log_every: 100
   loss_type: lp
   lr_params:
-    max: 5.0e-05
-    type: const
+    max: 1.0e-12
+    min: 1.0e-15
+    type: cosine-annealing-warmup
+    warmup: 0.1
   n_batch_per_loop: 20
   n_batch_validation: 10
   n_frames_validation: 200
@@ -44,10 +46,8 @@ training:
   occlusion_radius: 0
   occlusion_strategy: random
   optim_params:
-    beta_hi: 0.999
-    beta_lo: 0.9
-    type: adam
-    weight_decay: 0.1
+    momentum: 0.9
+    type: sgd
   output_min_size_hi: 64
   output_min_size_lo: 10
   reg_func: clamped_linear

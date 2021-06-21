@@ -8,9 +8,9 @@ import pickle
 
 import numpy as np
 import torch
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
-from cellmincer.models import DenoisingModel, init_model
+from cellmincer.models import DenoisingModel, init_model, get_best_window_padding
 from cellmincer.util import \
     OptopatchBaseWorkspace, \
     OptopatchDenoisingWorkspace, \
@@ -20,8 +20,12 @@ from cellmincer.util import \
 class Noise2Self:
     def __init__(
             self,
-            params: dict):
+            params: dict,
+            x_padding: Optional[int] = None,
+            y_padding: Optional[int] = None):
         self.params = params
+        self.x_padding = x_padding
+        self.y_padding = y_padding
         
     def load_datasets(self) -> List[OptopatchDenoisingWorkspace]:
         logging.info('Loading datasets...')
@@ -32,6 +36,7 @@ class Noise2Self:
 
         ws_denoising_list = []
         for i_dataset in range(len(datasets)):
+            
             base_diff_path = os.path.join(dataset_dirs[i_dataset], 'trend_subtracted.npy')
             ws_base_diff = OptopatchBaseWorkspace.from_npy(base_diff_path)
 
@@ -46,14 +51,30 @@ class Noise2Self:
             with open(opto_feature_path, 'rb') as f:
                 feature_container = pickle.Unpickler(f).load()
 
+            if self.x_padding is None:
+                _, x_padding = get_best_window_padding(
+                    model_config=self.params['model'],
+                    output_min_size_lo=ws_base_diff.width,
+                    output_min_size_hi=ws_base_diff.width)
+            else:
+                x_padding = self.x_padding
+
+            if self.y_padding is None:
+                _, y_padding = get_best_window_padding(
+                    model_config=self.params['model'],
+                    output_min_size_lo=ws_base_diff.height,
+                    output_min_size_hi=ws_base_diff.height)
+            else:
+                y_padding = self.y_padding
+
             ws_denoising_list.append(
                 OptopatchDenoisingWorkspace(
                     ws_base_diff=ws_base_diff,
                     ws_base_bg=ws_base_bg,
                     noise_params=noise_params,
                     features=feature_container,
-                    x_padding=0,
-                    y_padding=0,
+                    x_padding=x_padding,
+                    y_padding=y_padding,
                     device=self.params['device'],
                     dtype=consts.DEFAULT_DTYPE
                 )

@@ -30,4 +30,4 @@ model:
 root_data_dir: /home/jupyter/bw-data/cellmincer/data
 root_denoise_dir: /home/jupyter/bw-data/cellmincer/denoise
 root_model_dir: /home/jupyter/bw-data/cellmincer/models
-state_index: 0
+state_index: 3

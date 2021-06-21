@@ -226,9 +226,11 @@ def get_unet_input_size(
     return input_size
 
 
-# TODO rename?
-def get_best_gunet_input_size(
-        gunet: GUNet,
+def get_best_gunet_input_output_size(
+        unet_kernel_size: int,
+        n_conv_layers: int,
+        depth: int,
+        ds_rate: int,
         output_min_size_lo: int,
         output_min_size_hi: int) -> int:
     '''
@@ -244,10 +246,10 @@ def get_best_gunet_input_size(
     for output_min_size in range(output_min_size_lo, output_min_size_hi + 1):
         input_size = get_unet_input_size(
             output_min_size=output_min_size,
-            kernel_size=gunet.unet_kernel_size, 
-            n_conv_layers=gunet.n_conv_layers,
-            depth=gunet.depth,
-            ds_rate=gunet.ds_rate)
+            kernel_size=unet_kernel_size, 
+            n_conv_layers=n_conv_layers,
+            depth=depth,
+            ds_rate=ds_rate)
         output_pixels_to_input_pixels_list.append(output_min_size / input_size)
         input_size_list.append(input_size)
         output_size_list.append(output_min_size)

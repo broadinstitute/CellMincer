@@ -49,12 +49,13 @@ class DenoisingModel(nn.Module):
         raise NotImplementedError
 
     '''
-    Computes the input and output size with maximal out/in ratio
-    constrained by the range of output sizes.
+    Returns the window size and padding for an image dimension with maximal output/input ratio,
+    constrained by the output bounds.
     '''
-    def get_best_input_size(
-            self,
+    @staticmethod
+    def get_best_window_padding(
+            config: dict,
             output_lo: int,
-            output_hi: int) -> Tuple[int, int, int, int]:
+            output_hi: int) -> Tuple[int, int]:
         
         raise NotImplementedError

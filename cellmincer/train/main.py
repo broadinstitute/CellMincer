@@ -9,10 +9,11 @@ import pickle
 import matplotlib.pylab as plt
 import numpy as np
 import torch
+import pandas as pd
 from typing import List
 
 from cellmincer.containers import Noise2Self
-from cellmincer.models import DenoisingModel
+from cellmincer.models import DenoisingModel, get_best_window_padding
 from cellmincer.util import \
     OptopatchBaseWorkspace, \
     OptopatchDenoisingWorkspace, \
@@ -33,7 +34,18 @@ class Train:
             params: dict):
         self.params = params
         
-        self.ws_denoising_list, self.denoising_model = Noise2Self(params).get_resources()
+        self.x_window, x_padding = get_best_window_padding(
+            model_config=self.params['model'],
+            output_min_size_lo=self.params['training']['output_min_size_lo'],
+            output_min_size_hi=self.params['training']['output_min_size_hi'])
+        self.y_window, y_padding = self.x_window, x_padding
+        
+        n2s = Noise2Self(
+            params=params,
+            x_padding=x_padding,
+            y_padding=y_padding)
+        
+        self.ws_denoising_list, self.denoising_model = n2s.get_resources()
 
         if 'state_index' in self.params:
             model_dir = os.path.join(self.params['root_model_dir'], self.params['model']['type'])
@@ -51,46 +63,53 @@ class Train:
             os.mkdir(model_dir)
 
         logging.info('Training model...')
+        training_config = self.params['training']
         
-        # get xy training window
-        x_window, y_window, x_padding, y_padding = self.denoising_model.get_best_input_size(
-            self.params['training']['output_min_size_lo'],
-            self.params['training']['output_min_size_hi'])
-        
-        if 'seed' in self.params['training']:
-            torch.manual_seed(self.params['training']['seed'])
+        if 'seed' in training_config:
+            torch.manual_seed(training_config['seed'])
         self.denoising_model.train()
 
-        n_iters = self.params['training']['n_iters']
-        n_loop = self.params['training']['n_loop']
+        n_iters = training_config['n_iters']
+        n_loop = training_config['n_loop']
 
         # initialize optimizer and scheduler if not loaded from save state
         if self.optim is None:
             self.optim = generate_optimizer(
                 denoising_model=self.denoising_model,
-                optim_params=self.params['training']['optim_params'],
-                lr=self.params['training']['lr_params']['max'])
+                optim_params=training_config['optim_params'],
+                lr=training_config['lr_params']['max'])
         if self.sched is None:
             self.sched = generate_lr_scheduler(
                 optim=self.optim,
-                lr_params=self.params['training']['lr_params'],
+                lr_params=training_config['lr_params'],
                 n_iters=n_iters)
 
-        enable_continuity_reg = self.params['training']['enable_continuity_reg']
+        enable_continuity_reg = training_config['enable_continuity_reg']
         
         start_iter = (
-            self.params['state_index'] * self.params['training']['save_every']
+            self.params['state_index'] * training_config['save_every']
             if 'state_index' in self.params else 0)
+        
+        # select validation frames and shape into batches
+        assert training_config['n_frames_validation'] % training_config['n_batch_validation'] == 0
         
         val_dataset_indices, val_frame_indices = generate_batch_indices(
             self.ws_denoising_list,
-            n_batch=self.params['training']['n_batch_validation'],
+            n_batch=training_config['n_frames_validation'],
             t_mid=self.denoising_model.t_order,
             dataset_selection='balanced')
+        val_batch_shape = (
+            training_config['n_frames_validation'] // training_config['n_batch_validation'],
+            training_config['n_batch_validation'])
+        val_dataset_indices = val_dataset_indices.reshape(val_batch_shape)
+        val_frame_indices = val_frame_indices.reshape(val_batch_shape)
+        
         last_val_loss = None
 
+        total_loss_hist = []
         rec_loss_hist = []
         reg_loss_hist = []
+        val_loss_hist = []
 
         update_time = True
         for i_iter in range(start_iter, n_iters):
@@ -98,6 +117,7 @@ class Train:
                 start = time.time()
                 update_time = False
             
+            c_total_loss_hist = []
             c_rec_loss_hist = []
             c_reg_loss_hist = []
 
@@ -108,13 +128,13 @@ class Train:
                 batch_data = generate_occluded_training_data(
                     ws_denoising_list=self.ws_denoising_list,
                     t_order=self.denoising_model.t_order,
-                    t_tandem=self.params['training']['t_tandem'],
-                    n_batch=self.params['training']['n_batch_per_loop'],
-                    x_window=x_window,
-                    y_window=y_window,
-                    occlusion_prob=self.params['training']['occlusion_prob'],
-                    occlusion_radius=self.params['training']['occlusion_radius'],
-                    occlusion_strategy=self.params['training']['occlusion_strategy'],
+                    t_tandem=training_config['t_tandem'],
+                    n_batch=training_config['n_batch_per_loop'],
+                    x_window=self.x_window,
+                    y_window=self.y_window,
+                    occlusion_prob=training_config['occlusion_prob'],
+                    occlusion_radius=training_config['occlusion_radius'],
+                    occlusion_strategy=training_config['occlusion_strategy'],
                     device=self.params['device'],
                     dtype=consts.DEFAULT_DTYPE)
 
@@ -122,19 +142,22 @@ class Train:
                     batch_data=batch_data,
                     ws_denoising_list=self.ws_denoising_list,
                     denoising_model=self.denoising_model,
-                    norm_p=self.params['training']['norm_p'],
-                    loss_type=self.params['training']['loss_type'],
+                    norm_p=training_config['norm_p'],
+                    loss_type=training_config['loss_type'],
                     enable_continuity_reg=enable_continuity_reg,
-                    reg_func=self.params['training']['reg_func'],
-                    continuity_reg_strength=self.params['training']['continuity_reg_strength'],
-                    noise_threshold_to_std=self.params['training']['noise_threshold_to_std'])
+                    reg_func=training_config['reg_func'],
+                    continuity_reg_strength=training_config['continuity_reg_strength'],
+                    noise_threshold_to_std=training_config['noise_threshold_to_std'])
 
                 # calculate gradient
                 if enable_continuity_reg:
-                    ((loss_dict['rec_loss'] + loss_dict['reg_loss']) / n_loop).backward()
+                    total_loss = (loss_dict['rec_loss'] + loss_dict['reg_loss']) / n_loop
                 else:
-                    (loss_dict['rec_loss'] / n_loop).backward()
+                    total_loss = loss_dict['rec_loss'] / n_loop
 
+                total_loss.backward()
+                
+                c_total_loss_hist.append(total_loss.item() * n_loop)
                 c_rec_loss_hist.append(loss_dict['rec_loss'].item())
                 if enable_continuity_reg:
                     c_reg_loss_hist.append(loss_dict['reg_loss'].item())
@@ -143,52 +166,61 @@ class Train:
             self.optim.step()
             self.sched.step()
             
-            if (i_iter + 1) % self.params['training']['validate_every'] == 0:
-                batch_data = generate_occluded_training_data(
-                    ws_denoising_list=self.ws_denoising_list,
-                    t_order=self.denoising_model.t_order,
-                    t_tandem=0,
-                    n_batch=self.params['training']['n_batch_validation'],
-                    # TODO assumes all datasets are compatible with the same full window
-                    x_window=self.ws_denoising_list[0].width,
-                    y_window=self.ws_denoising_list[0].height,
-                    occlusion_prob=1,
-                    occlusion_radius=0,
-                    occlusion_strategy='validation',
-                    dataset_indices=val_dataset_indices,
-                    frame_indices=val_frame_indices,
-                    device=self.params['device'],
-                    dtype=consts.DEFAULT_DTYPE)
-                
-                with torch.no_grad():
-                    loss_dict = get_noise2self_loss(
-                        batch_data=batch_data,
+            total_loss_hist.append(np.mean(c_total_loss_hist))
+            rec_loss_hist.append(np.mean(c_rec_loss_hist))
+            if enable_continuity_reg:
+                reg_loss_hist.append(np.mean(c_reg_loss_hist))
+            
+            if (i_iter + 1) % training_config['validate_every'] == 0:
+                c_val_loss = []
+                for val_dataset_batch, val_frame_batch in zip(val_dataset_indices, val_frame_indices):
+                    batch_data = generate_occluded_training_data(
                         ws_denoising_list=self.ws_denoising_list,
-                        denoising_model=self.denoising_model,
-                        norm_p=self.params['training']['norm_p'],
-                        loss_type=self.params['training']['loss_type'],
-                        enable_continuity_reg=enable_continuity_reg,
-                        reg_func=self.params['training']['reg_func'],
-                        continuity_reg_strength=self.params['training']['continuity_reg_strength'],
-                        noise_threshold_to_std=self.params['training']['noise_threshold_to_std'])
-                
-                if enable_continuity_reg:
-                    last_val_loss = (loss_dict['rec_loss'] + loss_dict['reg_loss']).item()
-                else:
-                    last_val_loss = loss_dict['rec_loss'].item()
-                
-                # TODO record val loss somewhere
+                        t_order=self.denoising_model.t_order,
+                        t_tandem=0,
+                        n_batch=training_config['n_batch_validation'],
+                        # TODO assumes all datasets are compatible with the same full window
+                        x_window=self.ws_denoising_list[0].width,
+                        y_window=self.ws_denoising_list[0].height,
+                        occlusion_prob=1,
+                        occlusion_radius=0,
+                        occlusion_strategy='validation',
+                        dataset_indices=val_dataset_batch,
+                        frame_indices=val_frame_batch,
+                        device=self.params['device'],
+                        dtype=consts.DEFAULT_DTYPE)
 
-            if (i_iter + 1) % self.params['training']['log_every'] == 0:
+                    with torch.no_grad():
+                        loss_dict = get_noise2self_loss(
+                            batch_data=batch_data,
+                            ws_denoising_list=self.ws_denoising_list,
+                            denoising_model=self.denoising_model,
+                            norm_p=training_config['norm_p'],
+                            loss_type=training_config['loss_type'],
+                            enable_continuity_reg=enable_continuity_reg,
+                            reg_func=training_config['reg_func'],
+                            continuity_reg_strength=training_config['continuity_reg_strength'],
+                            noise_threshold_to_std=training_config['noise_threshold_to_std'])
+                
+                    if enable_continuity_reg:
+                        c_val_loss.append((loss_dict['rec_loss'] + loss_dict['reg_loss']).item())
+                        
+                    else:
+                        c_val_loss.append(loss_dict['rec_loss'].item())
+
+                last_val_loss = np.mean(c_val_loss)
+                val_loss_hist.append(last_val_loss)
+
+            if (i_iter + 1) % training_config['log_every'] == 0:
                 elapsed = time.time() - start
                 update_time = True
                 logging.info(
                     f'iter {i_iter + 1}/{n_iters} | '
                     f'val loss={last_val_loss:.1f} | '
-                    f'{self.params["training"]["log_every"] / elapsed:.2f} iter/s')
+                    f'{training_config["log_every"] / elapsed:.2f} iter/s')
 
-            if (i_iter + 1) % self.params['training']['save_every'] == 0:
-                index = (i_iter + 1) // self.params['training']['save_every']
+            if (i_iter + 1) % training_config['save_every'] == 0:
+                index = (i_iter + 1) // training_config['save_every']
                 logging.info(f'Saving checkpoint at index {index}')
                 save_model_state(
                     denoising_model=self.denoising_model,
@@ -205,3 +237,18 @@ class Train:
             denoising_model=self.denoising_model,
             model_dir=model_dir,
             index=0)
+
+        train_loss_dict = {
+            'iter': np.arange(1, n_iters + 1),
+            'total_loss': total_loss_hist,
+            'rec_loss': rec_loss_hist}
+        if enable_continuity_reg:
+            train_loss_dict['reg_loss'] = reg_loss_hist
+        train_loss_df = pd.DataFrame(train_loss_dict)
+        
+        val_loss_df = pd.DataFrame({
+            'iter': np.arange(training_config['validate_every'], n_iters + 1, training_config['validate_every']),
+            'val_loss': val_loss_hist})
+        
+        train_loss_df.to_csv(os.path.join(model_dir, 'train_loss.csv'), index=False)
+        val_loss_df.to_csv(os.path.join(model_dir, 'val_loss.csv'), index=False)

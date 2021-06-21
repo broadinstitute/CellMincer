@@ -6,7 +6,7 @@ from typing import List, Tuple, Dict
 from .components import \
     activation_from_str, \
     GUNet, \
-    get_best_gunet_input_size, \
+    get_best_gunet_input_output_size, \
     TemporalDenoiser
 
 from .denoising_model import DenoisingModel
@@ -180,15 +180,18 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
         
         denoised_movie_txy = torch.cat(denoised_movie_txy_full_list, dim=0)
         return denoised_movie_txy
-        
 
-    '''
-    Returns the xy window dimensions and padding dimensions with maximal output/input area ratio.
-    '''
-    def get_best_input_size(
-            self,
+    @staticmethod
+    def get_best_window_padding(
+            config: dict,
             output_min_size_lo: int,
             output_min_size_hi: int) -> Tuple[int, int]:
-        input_size, output_size = get_best_gunet_input_size(self.spatial_unet, output_min_size_lo, output_min_size_hi)
+        input_size, output_size = get_best_gunet_input_output_size(
+            unet_kernel_size=config['spatial_unet_kernel_size'],
+            n_conv_layers=config['spatial_unet_n_conv_layers'],
+            depth=config['spatial_unet_depth'],
+            ds_rate=2,
+            output_min_size_lo=output_min_size_lo,
+            output_min_size_hi=output_min_size_lo)
         padding = (input_size - output_size) // 2
-        return output_size, output_size, padding, padding
+        return output_size, padding

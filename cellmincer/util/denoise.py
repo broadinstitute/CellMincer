@@ -56,6 +56,8 @@ def generate_batch_indices(
         dataset_indices = np.random.randint(0, len(ws_denoising_list), size=n_batch)
     elif dataset_selection == 'balanced':
         dataset_indices = np.arange(n_batch) % len(ws_denoising_list)
+        
+    dataset_indices.sort()
 
     n_frame_array = np.array([ws_denoising.n_frames for ws_denoising in ws_denoising_list])
     frame_indices = np.random.randint(t_mid, n_frame_array[dataset_indices] - t_mid)
@@ -390,7 +392,7 @@ def generate_lr_scheduler(
         sched = LambdaLR(optim, lr_lambda=lambda it: 1)
     elif lr_params['type'] == 'cosine-annealing-warmup':
         sched = CosineAnnealingWarmupRestarts(
-            optim=optim,
+            optim,
             first_cycle_steps=n_iters,
             cycle_mult=1.0,
             max_lr=lr_params['max'],

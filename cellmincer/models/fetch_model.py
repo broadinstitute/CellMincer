@@ -3,6 +3,7 @@ import torch
 from torch import nn
 
 import logging
+from typing import Tuple
 
 from .denoising_model import DenoisingModel
 
@@ -28,9 +29,23 @@ def init_model(
     try:
         denoising_model = _MODEL_DICT[model_config['type']](model_config, device, dtype)
     except KeyError:
-        logging.warning('Unrecognized model type; see recognized options:')
+        logging.warning(f'Unrecognized model type; options are {", ".join([name for name in _MODEL_DICT])}')
         exit(0)
     if model_state_path is not None:
         denoising_model.load_state_dict(torch.load(model_state_path))
         
     return denoising_model
+
+
+def get_best_window_padding(
+        model_config: dict,
+        output_min_size_lo: int,
+        output_min_size_hi: int) -> Tuple[int, int, int, int]:
+    try:
+        return _MODEL_DICT[model_config['type']].get_best_window_padding(
+            config=model_config,
+            output_min_size_lo=output_min_size_lo,
+            output_min_size_hi=output_min_size_hi)
+    except KeyError:
+        logging.warning(f'Unrecognized model type; options are {", ".join([name for name in _MODEL_DICT])}')
+        exit(0)
