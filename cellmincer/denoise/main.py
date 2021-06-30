@@ -27,19 +27,24 @@ class Denoise:
     def __init__(
             self,
             params: dict):
-        self.params = params
+        
+        self.name = params['name']
+        self.root_denoise_dir = params['root_denoise_dir']
+        self.datasets = params['datasets']
+        self.write_avi = params['write_avi']
         
         self.ws_denoising_list, self.denoising_model = Noise2Self(params).get_resources()
+        self.denoising_model.load_state_dict(torch.load(params['model_state_path']))
     
     def run(self):
-        denoise_dir = os.path.join(self.params['root_denoise_dir'], self.params['name'])
+        denoise_dir = os.path.join(self.root_denoise_dir, self.name)
         if not os.path.exists(denoise_dir):
             os.mkdir(denoise_dir)
 
         logging.info('Denoising movies...')
         self.denoising_model.eval()
         
-        for i_dataset, (name, ws_denoising) in enumerate(zip(self.params['datasets'], self.ws_denoising_list)):
+        for i_dataset, (name, ws_denoising) in enumerate(zip(self.datasets, self.ws_denoising_list)):
             start = time.time()
             denoised_movie_txy = crop_center(
                 self.denoising_model.denoise_movie(ws_denoising).numpy(),
@@ -56,7 +61,7 @@ class Denoise:
             elapsed = time.time() - start
             logging.info(f'({i_dataset + 1}/{len(self.ws_denoising_list)}) {name} -- {elapsed:.2f} s')
             
-            if self.params['write_avi']:
+            if self.write_avi:
                 denoised_movie_norm_txy = self.normalize_movie(
                     denoised_movie_txy - ws_denoising.ws_base_bg.movie_txy,
                     n_sigmas=10)

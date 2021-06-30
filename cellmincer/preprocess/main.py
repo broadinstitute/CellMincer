@@ -20,25 +20,32 @@ class Preprocess:
     def __init__(
             self,
             params: dict):
-        self.params = params
+        
+        self.root_data_dir = params['root_data_dir']
+        self.device = torch.device(params['device'])
+        self.datasets = params['datasets']
+        
+        self.dejitter = params['dejitter']
+        self.noise_estimation = params['noise_estimation']
+        self.trim = params['trim']
+        self.detrend = params['detrend']
+        self.bfgs = params['bfgs']
 
     def run(self):
-        # load datasets
-        datasets = self.params['datasets']
-
-        assert all([os.path.exists(dataset['movie']) for dataset in datasets]), [os.path.exists(dataset['movie']) for dataset in datasets]
+        
+        assert all([os.path.exists(dataset['movie']) for dataset in self.datasets]), [os.path.exists(dataset['movie']) for dataset in self.datasets]
 
         logging.info('Creating data directories...')
-        for i_dataset, dataset in enumerate(datasets):
+        for i_dataset, dataset in enumerate(self.datasets):
             # appends config tag to data directory if tag exists
-            data_dir = os.path.join(self.params['root_data_dir'], dataset['name'])
+            data_dir = os.path.join(self.root_data_dir, dataset['name'])
             if not os.path.exists(data_dir):
                 os.mkdir(data_dir)
-            logging.info(f'({i_dataset + 1}/{len(datasets)}) {data_dir}')
+            logging.info(f'({i_dataset + 1}/{len(self.datasets)}) {data_dir}')
 
         logging.info('Preprocessing datasets...')
-        for i_dataset, dataset in enumerate(datasets):
-            logging.info(f'({i_dataset + 1}/{len(datasets)}) {dataset["name"]}')
+        for i_dataset, dataset in enumerate(self.datasets):
+            logging.info(f'({i_dataset + 1}/{len(self.datasets)}) {dataset["name"]}')
 
             if dataset['movie'].endswith('.npy'):
                 ws_base = OptopatchBaseWorkspace.from_npy(dataset['movie'], order=dataset['order'])
@@ -65,31 +72,21 @@ class Preprocess:
             # this is a heuristic -- ideally, one needs to be given this information!
             movie_txy = self.dejitter(
                 movie_txy=ws_base.movie_txy,
-                dejitter_config=self.params['dejitter'],
-                ds_params=dataset['params'],
-                name=dataset['name'])
+                dataset=dataset)
 
             # estimate noise from dejittered movie
             noise_model_params = self.estimate_noise(
                 movie_txy=movie_txy,
-                noise_estimation_config=self.params['noise_estimation'],
-                trim_config=self.params['trim'],
-                ds_params=dataset['params'],
-                name=dataset['name'])
+                dataset=dataset)
 
             # fit segment trends
             trimmed_segments_txy_list, mu_segments_txy_list = self.detrend(
                 movie_txy=movie_txy,
                 noise_model_params=noise_model_params,
-                detrend_config=self.params['detrend'],
-                trim_config=self.params['trim'],
-                bfgs_kwargs=self.params['bfgs_kwargs'],
-                ds_params=dataset['params'],
-                name=dataset['name'],
-                device=self.params['device'])
+                dataset=dataset)
 
             # save results to data directory
-            data_dir = os.path.join(self.params['root_data_dir'], dataset['name'])
+            data_dir = os.path.join(self.root_data_dir, dataset['name'])
             
             logging.info(f'writing output to {data_dir}/')
 
@@ -114,39 +111,37 @@ class Preprocess:
     def dejitter(
             self,
             movie_txy: np.ndarray,
-            dejitter_config: dict,
-            ds_params: dict,
-            name: str) -> np.ndarray:
+            dataset: dict) -> np.ndarray:
 
-        baseline = np.min(movie_txy[dejitter_config['ignore_first_n_frames']:, :, :])
+        baseline = np.min(movie_txy[self.dejitter['ignore_first_n_frames']:, :, :])
         logging.info(f"baseline CCD dc offset estimate: {baseline:.3f}")
 
         log_movie_txy = np.log(np.maximum(movie_txy - baseline, 1.))
         log_movie_mean_t = log_movie_txy.mean((-1, -2))
 
-        if dejitter_config['detrending_method'] in {'median', 'mean'}:
+        if self.dejitter['detrending_method'] in {'median', 'mean'}:
             log_movie_mean_trend_t = self.get_trend(
                 log_movie_mean_t,
-                dejitter_config['detrending_order'],
-                dejitter_config['detrending_method'])
+                self.dejitter['detrending_order'],
+                self.dejitter['detrending_method'])
 
-        elif dejitter_config['detrending_method'] == 'stft':
+        elif self.dejitter['detrending_method'] == 'stft':
             stft_f, stft_t, stft_Zxx = stft(
                 log_movie_mean_t,
                 boundary='constant',
-                fs=ds_params['sampling_rate'],
-                nperseg=dejitter_config['stft_nperseg'],
-                noverlap=dejitter_config['stft_noverlap'])
+                fs=dataset['params']['sampling_rate'],
+                nperseg=self.dejitter['stft_nperseg'],
+                noverlap=self.dejitter['stft_noverlap'])
 
             jitter_freq_filter = 1. / (1 + np.exp(
-                dejitter_config['stft_lp_slope'] * (stft_f - dejitter_config['stft_lp_cutoff'])))
+                self.dejitter['stft_lp_slope'] * (stft_f - self.dejitter['stft_lp_cutoff'])))
 
             filtered_Zxx = stft_Zxx * jitter_freq_filter[:, None]
             _, filtered_log_movie_mean_t = istft(
                 filtered_Zxx,
-                fs=ds_params['sampling_rate'],
-                nperseg=dejitter_config['stft_nperseg'],
-                noverlap=dejitter_config['stft_noverlap'])
+                fs=dataset['params']['sampling_rate'],
+                nperseg=self.dejitter['stft_nperseg'],
+                noverlap=self.dejitter['stft_noverlap'])
 
             log_movie_mean_trend_t = filtered_log_movie_mean_t[:log_movie_mean_t.size]
 
@@ -156,21 +151,21 @@ class Preprocess:
         log_jitter_factor_t = log_movie_mean_t - log_movie_mean_trend_t
         dejittered_movie_txy = np.exp(log_movie_txy - log_jitter_factor_t[:, None, None]) + baseline
         
-        if dejitter_config['show_diagnostic_plots']:
+        if self.dejitter['show_diagnostic_plots']:
             fg_mask_xy = ws_base.corr_otsu_fg_pixel_mask_xy
             bg_mask_xy = ~fg_mask_xy
 
             # raw frame-to-frame log variations
             fg_raw_mean_t = np.mean(np.log(ws_base.movie_txy.reshape(ws_base.n_frames, -1)[
-                dejitter_config['ignore_first_n_frames']:, fg_mask_xy.flatten()] - baseline), axis=-1)
+                self.dejitter['ignore_first_n_frames']:, fg_mask_xy.flatten()] - baseline), axis=-1)
             bg_raw_mean_t = np.mean(np.log(ws_base.movie_txy.reshape(ws_base.n_frames, -1)[
-                dejitter_config['ignore_first_n_frames']:, bg_mask_xy.flatten()] - baseline), axis=-1)
+                self.dejitter['ignore_first_n_frames']:, bg_mask_xy.flatten()] - baseline), axis=-1)
 
             # de-jittered frame-to-frame log variations
             fg_dj_mean_t = np.mean(np.log(dejittered_movie_txy.reshape(ws_base.n_frames, -1)[
-                dejitter_config['ignore_first_n_frames']:, fg_mask_xy.flatten()] - baseline), axis=-1)
+                self.dejitter['ignore_first_n_frames']:, fg_mask_xy.flatten()] - baseline), axis=-1)
             bg_dj_mean_t = np.mean(np.log(dejittered_movie_txy.reshape(ws_base.n_frames, -1)[
-                dejitter_config['ignore_first_n_frames']:, bg_mask_xy.flatten()] - baseline), axis=-1)
+                self.dejitter['ignore_first_n_frames']:, bg_mask_xy.flatten()] - baseline), axis=-1)
 
             fig = plt.figure()
             ax = plt.gca()
@@ -180,7 +175,7 @@ class Preprocess:
             ax.set_xlabel('Frame-to-frame log intensity difference')
             ax.legend()
             
-            fig.savefig(os.path.join(self.params['root_data_dir'], name, 'dejitter_before.png'))
+            fig.savefig(os.path.join(self.root_data_dir, dataset['name'], 'dejitter_before.png'))
 
             fig = plt.figure()
             ax = plt.gca()
@@ -190,7 +185,7 @@ class Preprocess:
             ax.set_xlabel('Frame-to-frame log intensity difference')
             ax.legend()
             
-            fig.savefig(os.path.join(self.params['root_data_dir'], name, 'dejitter_after.png'))
+            fig.savefig(os.path.join(self.root_data_dir, dataset['name'], 'dejitter_after.png'))
 
         return dejittered_movie_txy
 
@@ -198,61 +193,58 @@ class Preprocess:
     def estimate_noise(
             self,
             movie_txy: np.ndarray,
-            noise_estimation_config: dict,
-            trim_config: dict,
-            ds_params: dict,
-            name: str) -> dict:
+            dataset: dict) -> dict:
 
         slope_list = []
         intercept_list = []
 
-        if noise_estimation_config['plot_example']:
+        if self.noise_estimation['plot_example']:
             fig = plt.figure()
             ax = plt.gca()
             ax.set_xlabel('mean')
             ax.set_ylabel('variance')
             
-            fig.savefig(os.path.join(self.params['root_data_dir'], name, 'noise_mean_var.png'))
+            fig.savefig(os.path.join(self.root_data_dir, dataset['name'], 'noise_mean_var.png'))
 
-        for i_bootstrap in range(noise_estimation_config['n_bootstrap']):
+        for i_bootstrap in range(self.noise_estimation['n_bootstrap']):
 
             # choose a random segment
-            i_segment = np.random.randint(ds_params['n_segments'])
-            t, trimmed_seg_txy = self.get_flanking_segments(movie_txy, i_segment, trim_config, ds_params)
+            i_segment = np.random.randint(dataset['params']['n_segments'])
+            t, trimmed_seg_txy = self.get_flanking_segments(movie_txy, i_segment, self.trim, dataset['params'])
 
             # choose a random time
-            i_t = np.random.randint(0, high=len(t) - noise_estimation_config['stationarity_window'])
+            i_t = np.random.randint(0, high=len(t) - self.noise_estimation['stationarity_window'])
 
             # calculate empirical mean and variance, assuming signal stationarity
             mu_empirical = np.mean(trimmed_seg_txy[
-                i_t:(i_t + noise_estimation_config['stationarity_window']), ...], axis=0).flatten()
+                i_t:(i_t + self.noise_estimation['stationarity_window']), ...], axis=0).flatten()
             var_empirical = np.var(trimmed_seg_txy[
-                i_t:(i_t + noise_estimation_config['stationarity_window']), ...], axis=0, ddof=1).flatten()
+                i_t:(i_t + self.noise_estimation['stationarity_window']), ...], axis=0, ddof=1).flatten()
 
             # perform linear regression
             reg = LinearRegression().fit(mu_empirical[:, None], var_empirical[:, None])
             slope_list.append(reg.coef_.item())
             intercept_list.append(reg.intercept_.item())
 
-            if noise_estimation_config['plot_example'] and i_bootstrap == 0:
+            if self.noise_estimation['plot_example'] and i_bootstrap == 0:
                 fit_var = reg.predict(mu_empirical[:, None])
                 ax.scatter(
-                    mu_empirical[::noise_estimation_config['plot_subsample']],
-                    var_empirical[::noise_estimation_config['plot_subsample']],
+                    mu_empirical[::self.noise_estimation['plot_subsample']],
+                    var_empirical[::self.noise_estimation['plot_subsample']],
                     s=1,
                     alpha=0.1,
                     color='black')
                 ax.plot(mu_empirical, fit_var, color='red', alpha=0.1)
             
-                fig.savefig(os.path.join(self.params['root_data_dir'], name, 'noise_reg.png'))
+                fig.savefig(os.path.join(self.root_data_dir, dataset['name'], 'noise_reg.png'))
 
         alpha_median, alpha_std = np.median(slope_list), np.std(slope_list)
         beta_median, beta_std = np.median(intercept_list), np.std(intercept_list)
 
         # check that all variance is positive
         global_min_variance = np.inf
-        for i_segment in range(ds_params['n_segments']):
-            _, seg_txy = self.get_trimmed_segment(movie_txy, i_segment, trim_config, ds_params)
+        for i_segment in range(dataset['params']['n_segments']):
+            _, seg_txy = self.get_trimmed_segment(movie_txy, i_segment, self.trim, dataset['params'])
             min_obs_value_in_segment = np.min(seg_txy)
             min_variance = alpha_median * min_obs_value_in_segment + beta_median
             global_min_variance = min(global_min_variance, min_variance)
@@ -274,44 +266,39 @@ class Preprocess:
             self,
             movie_txy: np.ndarray,
             noise_model_params: dict,
-            detrend_config: dict,
-            trim_config: dict,
-            bfgs_kwargs: dict,
-            ds_params: dict,
-            name: str,
-            device: torch.device = torch.device('cuda')) -> Tuple[List, List]:
+            dataset: dict) -> Tuple[List, List]:
         # trimmed segments of the movie
         trimmed_segments_txy_list = []
 
         # background activity fits
         mu_segments_txy_list = []
 
-        for i_segment in range(ds_params['n_segments']):
+        for i_segment in range(dataset['params']['n_segments']):
             # get segment for fitting
-            t_fit, fit_seg_txy = self.get_flanking_segments(movie_txy, i_segment, trim_config, ds_params)
-            t_fit_torch = torch.tensor(t_fit, device=device, dtype=consts.DEFAULT_DTYPE)
-            fit_seg_txy_torch = torch.tensor(fit_seg_txy, device=device, dtype=consts.DEFAULT_DTYPE)
+            t_fit, fit_seg_txy = self.get_flanking_segments(movie_txy, i_segment, self.trim, dataset['params'])
+            t_fit_torch = torch.tensor(t_fit, device=self.device, dtype=consts.DEFAULT_DTYPE)
+            fit_seg_txy_torch = torch.tensor(fit_seg_txy, device=self.device, dtype=consts.DEFAULT_DTYPE)
             width, height = fit_seg_txy_torch.shape[1:]
 
-            if detrend_config['trend_model'] == 'polynomial':
+            if self.detrend['trend_model'] == 'polynomial':
                 trend_model = PolynomialIntensityTrendModel(
                     t_fit_torch=t_fit_torch,
                     fit_seg_txy_torch=fit_seg_txy_torch,
-                    poly_order=detrend_config['poly_order'],
-                    device=device,
+                    poly_order=self.detrend['poly_order'],
+                    device=self.device,
                     dtype=consts.DEFAULT_DTYPE)
-            elif detrend_config['trend_model'] == 'exponential':
+            elif self.detrend['trend_model'] == 'exponential':
                 trend_model = ExponentialDecayIntensityTrendModel(
                     t_fit=t_fit,
                     fit_seg_txy=fit_seg_txy,
-                    init_unc_decay_rate=detrend_config['init_unc_decay_rate'],
-                    device=device,
+                    init_unc_decay_rate=self.detrend['init_unc_decay_rate'],
+                    device=self.device,
                     dtype=consts.DEFAULT_DTYPE)
             else:
                 raise ValueError()
 
             # fit 
-            optim = torch.optim.LBFGS(trend_model.parameters(), **bfgs_kwargs)
+            optim = torch.optim.LBFGS(trend_model.parameters(), **self.bfgs)
 
             def closure():
                 optim.zero_grad()
@@ -324,23 +311,23 @@ class Preprocess:
                 loss.backward()
                 return loss
 
-            for i_iter in range(detrend_config['max_iters_per_segment']):
+            for i_iter in range(self.detrend['max_iters_per_segment']):
                 loss = optim.step(closure).item()
 
-            logging.info(f'detrended segment {i_segment + 1}/{ds_params["n_segments"]} | loss = {loss / (width * height * len(t_fit)):.6f}')
+            logging.info(f'detrended segment {i_segment + 1}/{dataset["params"]["n_segments"]} | loss = {loss / (width * height * len(t_fit)):.6f}')
 
-            t_trimmed, trimmed_seg_txy = self.get_trimmed_segment(movie_txy, i_segment, trim_config, ds_params)
-            t_trimmed_torch = torch.tensor(t_trimmed, device=device, dtype=consts.DEFAULT_DTYPE)
+            t_trimmed, trimmed_seg_txy = self.get_trimmed_segment(movie_txy, i_segment, self.trim, dataset['params'])
+            t_trimmed_torch = torch.tensor(t_trimmed, device=self.device, dtype=consts.DEFAULT_DTYPE)
             mu_txy = trend_model.get_baseline_txy(t_trimmed_torch).detach().cpu().numpy()
 
-            if detrend_config['plot_segments']:
+            if self.detrend['plot_segments']:
                 fig = plt.figure()
                 ax = plt.gca()
                 ax.scatter(t_trimmed, np.mean(trimmed_seg_txy, axis=(-1, -2)), s=1)
                 ax.scatter(t_trimmed, np.mean(mu_txy, axis=(-1, -2)), s=1)
                 ax.set_title(f'segment {i_segment + 1}')
                 
-                fig.savefig(os.path.join(self.params['root_data_dir'], name, f'detrend_{i_segment + 1}.png'))
+                fig.savefig(os.path.join(self.root_data_dir, dataset['name'], f'detrend_{i_segment + 1}.png'))
 
             # store
             trimmed_segments_txy_list.append(trimmed_seg_txy)
@@ -378,11 +365,10 @@ class Preprocess:
             self,
             movie_txy: np.ndarray,
             i_stim: int,
-            trim_config: dict,
             ds_params: dict,
             tranform_time: bool = True,) -> np.ndarray:
-        i_t_begin = ds_params['n_frames_per_segment'] * i_stim + trim_config['trim_left']
-        i_t_end = ds_params['n_frames_per_segment'] * (i_stim + 1) - trim_config['trim_right']
+        i_t_begin = ds_params['n_frames_per_segment'] * i_stim + self.trim['trim_left']
+        i_t_end = ds_params['n_frames_per_segment'] * (i_stim + 1) - self.trim['trim_right']
         i_t_list = [i_t for i_t in range(i_t_begin, i_t_end)]
         if tranform_time:
             t = np.asarray([i_t - i_t_begin for i_t in i_t_list]) / ds_params['sampling_rate']
@@ -394,18 +380,17 @@ class Preprocess:
             self,
             movie_txy: np.ndarray,
             i_stim: int,
-            trim_config: dict,
             ds_params: dict) -> Tuple[np.ndarray, np.ndarray]:
         t_begin_left = (
             ds_params['n_frames_per_segment'] * i_stim
-            + trim_config['trim_left'])
-        t_end_left = t_begin_left + trim_config['n_frames_fit_left']
+            + self.trim['trim_left'])
+        t_end_left = t_begin_left + self.trim['n_frames_fit_left']
 
         t_begin_right = (
             ds_params['n_frames_per_segment'] * (i_stim + 1)
-            - trim_config['trim_right']
-            - trim_config['n_frames_fit_right'])
-        t_end_right = t_begin_right + trim_config['n_frames_fit_right']
+            - self.trim['trim_right']
+            - self.trim['n_frames_fit_right'])
+        t_end_right = t_begin_right + self.trim['n_frames_fit_right']
 
         i_t_list = (
             [i_t for i_t in range(t_begin_left, t_end_left)]

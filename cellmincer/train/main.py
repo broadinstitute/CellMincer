@@ -32,15 +32,12 @@ class Train:
     def __init__(
             self,
             params: dict):
-        self.params = params
         
         self.x_window, x_padding = get_best_window_padding(
-            model_config=self.params['model'],
-            output_min_size_lo=self.params['training']['output_min_size_lo'],
-            output_min_size_hi=self.params['training']['output_min_size_hi'])
+            model_config=params['model'],
+            output_min_size_lo=params['training']['output_min_size_lo'],
+            output_min_size_hi=params['training']['output_min_size_hi'])
         self.y_window, y_padding = self.x_window, x_padding
-        
-        self.model_dir = os.path.join(self.params['root_model_dir'], self.params['name'])
         
         n2s = Noise2Self(
             params=params,
@@ -48,11 +45,11 @@ class Train:
             y_padding=y_padding)
         
         self.ws_denoising_list, self.denoising_model = n2s.get_resources()
-
-        self.training_config = self.params['training']
+        
+        self.model_dir = os.path.join(params['root_model_dir'], params['name'])
+        self.training_config = params['training']
         self.start_iter = 0
-        self.n_iters = self.training_config['n_iters']
-        self.n_loop = self.training_config['n_loop']
+        self.device = torch.device(params['device'])
         
         self.enable_continuity_reg = self.training_config['enable_continuity_reg']
         
@@ -64,7 +61,7 @@ class Train:
         self.sched = generate_lr_scheduler(
                 optim=self.optim,
                 lr_params=self.training_config['lr_params'],
-                n_iters=self.n_iters)
+                n_iters=self.training_config['n_iters'])
         
         self.train_loss_names = ['iter', 'total_loss', 'rec_loss', 'reg_loss'] \
             if self.enable_continuity_reg \
@@ -173,7 +170,7 @@ class Train:
         val_frame_indices = val_frame_indices.reshape(val_batch_shape)
 
         update_time = True
-        for i_iter in range(self.start_iter, self.n_iters):
+        for i_iter in range(self.start_iter, self.training_config['n_iters']):
             if update_time:
                 start = time.time()
                 update_time = False
@@ -186,7 +183,7 @@ class Train:
             self.optim.zero_grad()
             
             # aggregate gradients
-            for i_loop in range(self.n_loop):
+            for i_loop in range(self.training_config['n_loop']):
                 batch_data = generate_occluded_training_data(
                     ws_denoising_list=self.ws_denoising_list,
                     t_order=self.denoising_model.t_order,
@@ -197,7 +194,7 @@ class Train:
                     occlusion_prob=self.training_config['occlusion_prob'],
                     occlusion_radius=self.training_config['occlusion_radius'],
                     occlusion_strategy=self.training_config['occlusion_strategy'],
-                    device=self.params['device'],
+                    device=self.device,
                     dtype=consts.DEFAULT_DTYPE)
 
                 loss_dict = get_noise2self_loss(
@@ -213,13 +210,13 @@ class Train:
 
                 # calculate gradient
                 if self.enable_continuity_reg:
-                    total_loss = (loss_dict['rec_loss'] + loss_dict['reg_loss']) / self.n_loop
+                    total_loss = (loss_dict['rec_loss'] + loss_dict['reg_loss']) / self.training_config['n_loop']
                 else:
-                    total_loss = loss_dict['rec_loss'] / self.n_loop
+                    total_loss = loss_dict['rec_loss'] / self.training_config['n_loop']
 
                 total_loss.backward()
                 
-                c_total_loss_hist.append(total_loss.item() * self.n_loop)
+                c_total_loss_hist.append(total_loss.item() * self.training_config['n_loop'])
                 c_rec_loss_hist.append(loss_dict['rec_loss'].item())
                 if self.enable_continuity_reg:
                     c_reg_loss_hist.append(loss_dict['reg_loss'].item())
@@ -251,7 +248,7 @@ class Train:
                         occlusion_strategy='validation',
                         dataset_indices=val_dataset_batch,
                         frame_indices=val_frame_batch,
-                        device=self.params['device'],
+                        device=self.device,
                         dtype=consts.DEFAULT_DTYPE)
 
                     with torch.no_grad():
@@ -279,7 +276,7 @@ class Train:
                 update_time = True
                 val_loss_str = f'{self.val_loss_hist[-1][1]:.4f}' if self.val_loss_hist else 'n/a'
                 logging.info(
-                    f'iter {i_iter + 1}/{self.n_iters} | '
+                    f'iter {i_iter + 1}/{self.training_config["n_iters"]} | '
                     f'train loss={self.train_loss_hist[-1][1]:.4f} | '
                     f'val loss={val_loss_str} | '
                     f'{self.training_config["log_every"] / elapsed:.2f} iter/s')

@@ -23,14 +23,21 @@ class Noise2Self:
             params: dict,
             x_padding: Optional[int] = None,
             y_padding: Optional[int] = None):
-        self.params = params
+        
+        self.root_data_dir = params['root_data_dir']
+        self.name = params['name']
+        
+        self.model_config = params['model']
+        self.datasets = params['datasets']
+        self.device = torch.device(params['device'])
+        
         self.x_padding = x_padding
         self.y_padding = y_padding
         
     def load_datasets(self) -> List[OptopatchDenoisingWorkspace]:
         logging.info('Loading datasets...')
-        datasets = self.params['datasets']
-        dataset_dirs = [os.path.join(self.params['root_data_dir'], dataset) for dataset in datasets]
+        datasets = self.datasets
+        dataset_dirs = [os.path.join(self.root_data_dir, dataset) for dataset in datasets]
 
         assert all([os.path.exists(dataset_dir) for dataset_dir in dataset_dirs])
 
@@ -53,7 +60,7 @@ class Noise2Self:
 
             if self.x_padding is None:
                 _, x_padding = get_best_window_padding(
-                    model_config=self.params['model'],
+                    model_config=self.model_config,
                     output_min_size_lo=ws_base_diff.width,
                     output_min_size_hi=ws_base_diff.width)
             else:
@@ -61,7 +68,7 @@ class Noise2Self:
 
             if self.y_padding is None:
                 _, y_padding = get_best_window_padding(
-                    model_config=self.params['model'],
+                    model_config=self.model_config,
                     output_min_size_lo=ws_base_diff.height,
                     output_min_size_hi=ws_base_diff.height)
             else:
@@ -75,7 +82,7 @@ class Noise2Self:
                     features=feature_container,
                     x_padding=x_padding,
                     y_padding=y_padding,
-                    device=self.params['device'],
+                    device=self.device,
                     dtype=consts.DEFAULT_DTYPE
                 )
             )
@@ -86,12 +93,11 @@ class Noise2Self:
         self,
         n_global_features: int) -> DenoisingModel:
     
-        self.params['model']['n_global_features'] = n_global_features
-        model_dir = os.path.join(self.params['root_model_dir'], self.params['name'])
+        self.model_config['n_global_features'] = n_global_features
 
         denoising_model = init_model(
-            self.params['model'],
-            device=self.params['device'],
+            self.model_config,
+            device=self.device,
             dtype=consts.DEFAULT_DTYPE)
 
         return denoising_model

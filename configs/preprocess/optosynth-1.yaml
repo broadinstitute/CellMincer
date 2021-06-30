@@ -1,4 +1,4 @@
-bfgs_kwargs:
+bfgs:
   history_size: 100
   line_search_fn: strong_wolfe
   lr: 0.1
