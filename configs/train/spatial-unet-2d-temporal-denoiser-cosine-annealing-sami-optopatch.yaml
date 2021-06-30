@@ -1,5 +1,5 @@
 datasets:
-- cell_3_1_MMStack_Pos0
+- D1_FOV3_W2_at135105
 device: cuda
 log_dir: /home/jupyter/bw-data/cellmincer/logs
 model:
@@ -23,7 +23,7 @@ model:
   use_global_features: true
   use_layer_norm: false
   use_padding: false
-name: miller-ephys-standard
+name: sami-optopatch
 root_data_dir: /home/jupyter/bw-data/cellmincer/data
 root_model_dir: /home/jupyter/bw-data/cellmincer/models
 training:
@@ -32,8 +32,8 @@ training:
   log_every: 100
   loss_type: lp
   lr_params:
-    max: 0.0001
-    min: 1.0e-07
+    max: 1.0e-05
+    min: 1.0e-08
     type: cosine-annealing-warmup
     warmup: 0.1
   n_batch_per_loop: 20
@@ -52,6 +52,6 @@ training:
   output_min_size_hi: 64
   output_min_size_lo: 10
   reg_func: clamped_linear
-  save_every: 10000
+  save_every: 500
   t_tandem: 0
   validate_every: 100

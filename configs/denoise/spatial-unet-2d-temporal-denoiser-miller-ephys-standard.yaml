@@ -1,5 +1,9 @@
 datasets:
 - cell_3_1_MMStack_Pos0
+- cell_3_2_MMStack_Pos0
+- std_1_MMStack_Pos0
+- std_2_MMStack_Pos0
+- std_3_MMStack_Pos0
 device: cuda
 log_dir: /home/jupyter/bw-data/cellmincer/logs
 model:
@@ -25,33 +29,7 @@ model:
   use_padding: false
 name: miller-ephys-standard
 root_data_dir: /home/jupyter/bw-data/cellmincer/data
+root_denoise_dir: /home/jupyter/bw-data/cellmincer/denoise
 root_model_dir: /home/jupyter/bw-data/cellmincer/models
-training:
-  continuity_reg_strength: 1.0
-  enable_continuity_reg: false
-  log_every: 100
-  loss_type: lp
-  lr_params:
-    max: 0.0001
-    min: 1.0e-07
-    type: cosine-annealing-warmup
-    warmup: 0.1
-  n_batch_per_loop: 20
-  n_batch_validation: 10
-  n_frames_validation: 200
-  n_iters: 200000
-  n_loop: 1
-  noise_threshold_to_std: 0.05
-  norm_p: 2
-  occlusion_prob: 0.05
-  occlusion_radius: 0
-  occlusion_strategy: random
-  optim_params:
-    momentum: 0.9
-    type: sgd
-  output_min_size_hi: 64
-  output_min_size_lo: 10
-  reg_func: clamped_linear
-  save_every: 10000
-  t_tandem: 0
-  validate_every: 100
+state_index: 6
+write_avi: true

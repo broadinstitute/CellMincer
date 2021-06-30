@@ -324,7 +324,7 @@ def get_noise2self_loss(
         target_height=y_window)
     
     # reconstruction losses
-    total_masked_pixels_t = cropped_mask_ntxy.sum(dim=1).type(denoising_model.dtype)
+    total_masked_pixels_t = cropped_mask_ntxy.sum(dim=(0, 2, 3)).type(denoising_model.dtype)
     loss_scale_t = 1. / ((t_tandem + 1) * (eps + total_masked_pixels_t))
     loss_scale_ntxy = loss_scale_t[None, :, None, None]
     
@@ -364,7 +364,7 @@ def get_noise2self_loss(
         reg_loss = _compute_lp_loss(
             _err=total_variation_ntxy,
             _norm_p=norm_p,
-            _scale=continuity_reg_strength / ((t_tandem - 1) * total_pixels)) # TODO ask mehrtash about this term
+            _scale=continuity_reg_strength / ((t_tandem + 1) * total_pixels)) # TODO check with mehrtash on change from (t_tandem - 1)
             
     return {'rec_loss': rec_loss, 'reg_loss': reg_loss}
 
@@ -403,26 +403,3 @@ def generate_lr_scheduler(
         logging.error('unrecognized scheduler type')
         raise ValueError('Unrecognized scheduler type.')
     return sched
-
-
-def save_model_state(
-        denoising_model,
-        model_dir: str,
-        index: int,
-        optim = None,
-        sched = None,
-        save_train_state: bool = False):
-    model_ckpt_dir = os.path.join(model_dir, f'{index:06d}')
-    if not os.path.exists(model_ckpt_dir):
-        os.mkdir(model_ckpt_dir)
-
-    torch.save(
-        denoising_model.state_dict(),
-        os.path.join(model_ckpt_dir, 'model_state.pt'))
-    if save_train_state:
-        torch.save(
-            optim.state_dict(),
-            os.path.join(model_ckpt_dir, 'optim_state.pt'))
-        torch.save(
-            sched.state_dict(),
-            os.path.join(model_ckpt_dir, 'sched_state.pt'))

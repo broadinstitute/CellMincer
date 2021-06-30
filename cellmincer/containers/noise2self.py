@@ -87,20 +87,12 @@ class Noise2Self:
         n_global_features: int) -> DenoisingModel:
     
         self.params['model']['n_global_features'] = n_global_features
-        model_dir = os.path.join(self.params['root_model_dir'], self.params['model']['type'])
+        model_dir = os.path.join(self.params['root_model_dir'], self.params['name'])
 
-        if 'state_index' in self.params:
-            model_state_path = os.path.join(model_dir, f'{self.params["state_index"]:06d}', 'model_state.pt')
-            denoising_model = init_model(
-                self.params['model'],
-                model_state_path=model_state_path,
-                device=self.params['device'],
-                dtype=consts.DEFAULT_DTYPE)
-        else:
-            denoising_model = init_model(
-                self.params['model'],
-                device=self.params['device'],
-                dtype=consts.DEFAULT_DTYPE)
+        denoising_model = init_model(
+            self.params['model'],
+            device=self.params['device'],
+            dtype=consts.DEFAULT_DTYPE)
 
         return denoising_model
 

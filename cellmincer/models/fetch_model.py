@@ -23,7 +23,6 @@ _MODEL_DICT = {
 
 def init_model(
         model_config: dict,
-        model_state_path: str = None,
         device: torch.device = torch.device('cuda'),
         dtype: torch.dtype = torch.float32) -> DenoisingModel:
     try:
@@ -31,8 +30,6 @@ def init_model(
     except KeyError:
         logging.warning(f'Unrecognized model type; options are {", ".join([name for name in _MODEL_DICT])}')
         exit(0)
-    if model_state_path is not None:
-        denoising_model.load_state_dict(torch.load(model_state_path))
         
     return denoising_model
 

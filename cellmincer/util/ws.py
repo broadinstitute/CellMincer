@@ -2,6 +2,7 @@ import numpy as np
 from skimage.filters import threshold_otsu
 from boltons.cacheutils import cachedproperty
 import torch
+import tifffile
 import logging
 from typing import List, Tuple, Optional, Dict
 
@@ -76,6 +77,21 @@ class OptopatchBaseWorkspace:
         npz_file = np.load(movie_npz_path)
         movie_nnn = npz_file[key].astype(dtype)
         npz_file.close()
+        movie_txy = movie_nnn.transpose(tuple(map(order.find, 'txy')))
+        return OptopatchBaseWorkspace(
+            movie_txy=movie_txy,
+            dtype=dtype,
+            neighbor_dx_dy_list=neighbor_dx_dy_list)
+    
+    @staticmethod
+    def from_tiff(
+            movie_tiff_path: str,
+            order: str = 'txy',
+            dtype = np.float32,
+            neighbor_dx_dy_list: List[Tuple[int, int]] = DEFAULT_NEIGHBOR_DX_DY_LIST):
+        # load the movie
+        logging.debug(f"Loading movie from {movie_tiff_path} ...")
+        movie_nnn = tifffile.imread(movie_tiff_path).astype(dtype)
         movie_txy = movie_nnn.transpose(tuple(map(order.find, 'txy')))
         return OptopatchBaseWorkspace(
             movie_txy=movie_txy,

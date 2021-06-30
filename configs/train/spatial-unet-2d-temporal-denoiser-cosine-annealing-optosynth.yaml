@@ -1,5 +1,5 @@
 datasets:
-- cell_3_1_MMStack_Pos0
+- optosynth_first_wave__1__20__50
 device: cuda
 log_dir: /home/jupyter/bw-data/cellmincer/logs
 model:
@@ -23,7 +23,7 @@ model:
   use_global_features: true
   use_layer_norm: false
   use_padding: false
-name: miller-ephys-standard
+name: optosynth
 root_data_dir: /home/jupyter/bw-data/cellmincer/data
 root_model_dir: /home/jupyter/bw-data/cellmincer/models
 training:
@@ -32,14 +32,15 @@ training:
   log_every: 100
   loss_type: lp
   lr_params:
-    max: 0.0001
-    min: 1.0e-07
+    max: 0.001
+    min: 1.0e-05
     type: cosine-annealing-warmup
-    warmup: 0.1
+    warmup: 0.0
+  model_save_every: 500
   n_batch_per_loop: 20
   n_batch_validation: 10
   n_frames_validation: 200
-  n_iters: 200000
+  n_iters: 120000
   n_loop: 1
   noise_threshold_to_std: 0.05
   norm_p: 2
@@ -47,11 +48,13 @@ training:
   occlusion_radius: 0
   occlusion_strategy: random
   optim_params:
-    momentum: 0.9
-    type: sgd
+    beta_hi: 0.999
+    beta_lo: 0.9
+    type: adam
+    weight_decay: 0.1
   output_min_size_hi: 64
   output_min_size_lo: 10
   reg_func: clamped_linear
-  save_every: 10000
   t_tandem: 0
+  train_checkpoint_every: 10000
   validate_every: 100

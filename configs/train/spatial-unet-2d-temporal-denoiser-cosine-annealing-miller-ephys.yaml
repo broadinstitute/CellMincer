@@ -32,8 +32,8 @@ training:
   log_every: 100
   loss_type: lp
   lr_params:
-    max: 0.0001
-    min: 1.0e-07
+    max: 1.0e-05
+    min: 1.0e-08
     type: cosine-annealing-warmup
     warmup: 0.1
   n_batch_per_loop: 20
@@ -52,6 +52,6 @@ training:
   output_min_size_hi: 64
   output_min_size_lo: 10
   reg_func: clamped_linear
-  save_every: 10000
+  save_every: 500
   t_tandem: 0
   validate_every: 100

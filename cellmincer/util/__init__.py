@@ -1,12 +1,9 @@
-# TODO do i really need this?
-
 from .denoise import \
     generate_optimizer, \
     generate_lr_scheduler, \
     generate_batch_indices, \
     generate_occluded_training_data, \
-    get_noise2self_loss, \
-    save_model_state
+    get_noise2self_loss
 
 from .features import OptopatchGlobalFeatureExtractor
 

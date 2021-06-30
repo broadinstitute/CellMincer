@@ -7,6 +7,7 @@ __all__ = [
     '_CONV_TRANS_DICT',
     '_AVG_POOL_DICT',
     '_MAX_POOL_DICT',
+    '_LAYER_NORM_DICT',
     '_REFLECTION_PAD_DICT',
     '_CENTER_CROP_DICT',
     '_ACTIVATION_DICT',
@@ -77,6 +78,14 @@ _MAX_POOL_DICT = {
     1: nn.functional.max_pool1d,
     2: nn.functional.max_pool2d,
     3: nn.functional.max_pool3d
+}
+
+_LAYER_NORM_DICT = {
+    'batch': {
+        1: nn.BatchNorm1d,
+        2: nn.BatchNorm2d,
+        3: nn.BatchNorm3d
+    }
 }
 
 _REFLECTION_PAD_DICT = {

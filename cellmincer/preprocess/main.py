@@ -26,7 +26,7 @@ class Preprocess:
         # load datasets
         datasets = self.params['datasets']
 
-        assert all([os.path.exists(dataset['movie']) for dataset in datasets])
+        assert all([os.path.exists(dataset['movie']) for dataset in datasets]), [os.path.exists(dataset['movie']) for dataset in datasets]
 
         logging.info('Creating data directories...')
         for i_dataset, dataset in enumerate(datasets):
@@ -38,13 +38,27 @@ class Preprocess:
 
         logging.info('Preprocessing datasets...')
         for i_dataset, dataset in enumerate(datasets):
-            logging.info(f'{i_dataset + 1} -- {dataset["name"]}')
+            logging.info(f'({i_dataset + 1}/{len(datasets)}) {dataset["name"]}')
 
-            # TODO: clarify xy-axis-transposition
-            if dataset['movie'].endswith('.npz'):
-                ws_base = OptopatchBaseWorkspace.from_npz(dataset['movie'], order=dataset['order'])
-            elif dataset['movie'].endswith('.npy'):
+            if dataset['movie'].endswith('.npy'):
                 ws_base = OptopatchBaseWorkspace.from_npy(dataset['movie'], order=dataset['order'])
+            elif dataset['movie'].endswith('.npz'):
+                if 'key' in dataset:
+                    ws_base = OptopatchBaseWorkspace.from_npz(dataset['movie'], order=dataset['order'], key=dataset['key'])
+                else:
+                    ws_base = OptopatchBaseWorkspace.from_npz(dataset['movie'], order=dataset['order'])
+            elif dataset['movie'].endswith('.bin'):
+                ws_base = OptopatchBaseWorkspace.from_bin_uint16(
+                    dataset['movie'],
+                    n_frames=dataset['params']['n_frames'],
+                    width=dataset['params']['width'],
+                    height=dataset['params']['height'],
+                    order=dataset['order'])
+            elif dataset['movie'].endswith('.tif'):
+                ws_base = OptopatchBaseWorkspace.from_tiff(dataset['movie'], order=dataset['order'])
+            else:
+                logging.error('Unrecognized movie file format: options are .npy, .npz, .tiff')
+                raise ValueError
 
             # dejitter movie
             # estimate baseline (CCD dc offset)
@@ -52,14 +66,16 @@ class Preprocess:
             movie_txy = self.dejitter(
                 movie_txy=ws_base.movie_txy,
                 dejitter_config=self.params['dejitter'],
-                ds_params=dataset['params'])
+                ds_params=dataset['params'],
+                name=dataset['name'])
 
             # estimate noise from dejittered movie
             noise_model_params = self.estimate_noise(
                 movie_txy=movie_txy,
                 noise_estimation_config=self.params['noise_estimation'],
                 trim_config=self.params['trim'],
-                ds_params=dataset['params'])
+                ds_params=dataset['params'],
+                name=dataset['name'])
 
             # fit segment trends
             trimmed_segments_txy_list, mu_segments_txy_list = self.detrend(
@@ -69,6 +85,7 @@ class Preprocess:
                 trim_config=self.params['trim'],
                 bfgs_kwargs=self.params['bfgs_kwargs'],
                 ds_params=dataset['params'],
+                name=dataset['name'],
                 device=self.params['device'])
 
             # save results to data directory
@@ -98,7 +115,8 @@ class Preprocess:
             self,
             movie_txy: np.ndarray,
             dejitter_config: dict,
-            ds_params: dict) -> np.ndarray:
+            ds_params: dict,
+            name: str) -> np.ndarray:
 
         baseline = np.min(movie_txy[dejitter_config['ignore_first_n_frames']:, :, :])
         logging.info(f"baseline CCD dc offset estimate: {baseline:.3f}")
@@ -107,14 +125,12 @@ class Preprocess:
         log_movie_mean_t = log_movie_txy.mean((-1, -2))
 
         if dejitter_config['detrending_method'] in {'median', 'mean'}:
-
             log_movie_mean_trend_t = self.get_trend(
                 log_movie_mean_t,
                 dejitter_config['detrending_order'],
                 dejitter_config['detrending_method'])
 
         elif dejitter_config['detrending_method'] == 'stft':
-
             stft_f, stft_t, stft_Zxx = stft(
                 log_movie_mean_t,
                 boundary='constant',
@@ -135,11 +151,46 @@ class Preprocess:
             log_movie_mean_trend_t = filtered_log_movie_mean_t[:log_movie_mean_t.size]
 
         else:
-
             raise ValueError()
 
         log_jitter_factor_t = log_movie_mean_t - log_movie_mean_trend_t
         dejittered_movie_txy = np.exp(log_movie_txy - log_jitter_factor_t[:, None, None]) + baseline
+        
+        if dejitter_config['show_diagnostic_plots']:
+            fg_mask_xy = ws_base.corr_otsu_fg_pixel_mask_xy
+            bg_mask_xy = ~fg_mask_xy
+
+            # raw frame-to-frame log variations
+            fg_raw_mean_t = np.mean(np.log(ws_base.movie_txy.reshape(ws_base.n_frames, -1)[
+                dejitter_config['ignore_first_n_frames']:, fg_mask_xy.flatten()] - baseline), axis=-1)
+            bg_raw_mean_t = np.mean(np.log(ws_base.movie_txy.reshape(ws_base.n_frames, -1)[
+                dejitter_config['ignore_first_n_frames']:, bg_mask_xy.flatten()] - baseline), axis=-1)
+
+            # de-jittered frame-to-frame log variations
+            fg_dj_mean_t = np.mean(np.log(dejittered_movie_txy.reshape(ws_base.n_frames, -1)[
+                dejitter_config['ignore_first_n_frames']:, fg_mask_xy.flatten()] - baseline), axis=-1)
+            bg_dj_mean_t = np.mean(np.log(dejittered_movie_txy.reshape(ws_base.n_frames, -1)[
+                dejitter_config['ignore_first_n_frames']:, bg_mask_xy.flatten()] - baseline), axis=-1)
+
+            fig = plt.figure()
+            ax = plt.gca()
+            ax.hist(bg_raw_mean_t[1:] - bg_raw_mean_t[:-1], bins=200, range=(-0.01, 0.01), label='bg', alpha=0.5);
+            ax.hist(fg_raw_mean_t[1:] - fg_raw_mean_t[:-1], bins=200, range=(-0.01, 0.01), label='fg', alpha=0.5);
+            ax.set_title('BEFORE de-jittering')
+            ax.set_xlabel('Frame-to-frame log intensity difference')
+            ax.legend()
+            
+            fig.savefig(os.path.join(self.params['root_data_dir'], name, 'dejitter_before.png'))
+
+            fig = plt.figure()
+            ax = plt.gca()
+            ax.hist(bg_dj_mean_t[1:] - bg_dj_mean_t[:-1], bins=200, range=(-0.01, 0.01), label='bg', alpha=0.5);
+            ax.hist(fg_dj_mean_t[1:] - fg_dj_mean_t[:-1], bins=200, range=(-0.01, 0.01), label='fg', alpha=0.5);
+            ax.set_title('AFTER de-jittering')
+            ax.set_xlabel('Frame-to-frame log intensity difference')
+            ax.legend()
+            
+            fig.savefig(os.path.join(self.params['root_data_dir'], name, 'dejitter_after.png'))
 
         return dejittered_movie_txy
 
@@ -149,7 +200,8 @@ class Preprocess:
             movie_txy: np.ndarray,
             noise_estimation_config: dict,
             trim_config: dict,
-            ds_params: dict) -> dict:
+            ds_params: dict,
+            name: str) -> dict:
 
         slope_list = []
         intercept_list = []
@@ -159,6 +211,8 @@ class Preprocess:
             ax = plt.gca()
             ax.set_xlabel('mean')
             ax.set_ylabel('variance')
+            
+            fig.savefig(os.path.join(self.params['root_data_dir'], name, 'noise_mean_var.png'))
 
         for i_bootstrap in range(noise_estimation_config['n_bootstrap']):
 
@@ -180,7 +234,7 @@ class Preprocess:
             slope_list.append(reg.coef_.item())
             intercept_list.append(reg.intercept_.item())
 
-            if noise_estimation_config['plot_example']:
+            if noise_estimation_config['plot_example'] and i_bootstrap == 0:
                 fit_var = reg.predict(mu_empirical[:, None])
                 ax.scatter(
                     mu_empirical[::noise_estimation_config['plot_subsample']],
@@ -189,6 +243,8 @@ class Preprocess:
                     alpha=0.1,
                     color='black')
                 ax.plot(mu_empirical, fit_var, color='red', alpha=0.1)
+            
+                fig.savefig(os.path.join(self.params['root_data_dir'], name, 'noise_reg.png'))
 
         alpha_median, alpha_std = np.median(slope_list), np.std(slope_list)
         beta_median, beta_std = np.median(intercept_list), np.std(intercept_list)
@@ -201,8 +257,9 @@ class Preprocess:
             min_variance = alpha_median * min_obs_value_in_segment + beta_median
             global_min_variance = min(global_min_variance, min_variance)
             logging.info(f'min variance in segment {i_segment}: {min_variance:.3f}')
-            # TODO: a more controlled error handling
-            assert min_variance > 0, f'{min_variance} < 0'
+            
+            if min_variance > 0:
+                raise ValueError('estimated negative variance; dataset may be too noisy')
 
         return {
             'alpha_median': alpha_median,
@@ -221,6 +278,7 @@ class Preprocess:
             trim_config: dict,
             bfgs_kwargs: dict,
             ds_params: dict,
+            name: str,
             device: torch.device = torch.device('cuda')) -> Tuple[List, List]:
         # trimmed segments of the movie
         trimmed_segments_txy_list = []
@@ -281,6 +339,8 @@ class Preprocess:
                 ax.scatter(t_trimmed, np.mean(trimmed_seg_txy, axis=(-1, -2)), s=1)
                 ax.scatter(t_trimmed, np.mean(mu_txy, axis=(-1, -2)), s=1)
                 ax.set_title(f'segment {i_segment + 1}')
+                
+                fig.savefig(os.path.join(self.params['root_data_dir'], name, f'detrend_{i_segment + 1}.png'))
 
             # store
             trimmed_segments_txy_list.append(trimmed_seg_txy)
@@ -411,7 +471,7 @@ class PolynomialIntensityTrendModel(IntensityTrendModel):
                  poly_order: int,
                  device: torch.device,
                  dtype: torch.dtype):
-        assert poly_order >= 1
+        assert poly_order >= 0
         self.n_series = torch.arange(0, poly_order + 1, device=device, dtype=torch.int64)
 
         # initialize to standard linear regression

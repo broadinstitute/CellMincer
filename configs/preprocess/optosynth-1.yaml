@@ -54,7 +54,7 @@ detrend:
   init_unc_decay_rate: 1.0
   max_iters_per_segment: 3
   plot_segments: false
-  poly_order: 1
+  poly_order: 0
   trend_model: polynomial
 device: cuda
 log_dir: /home/jupyter/bw-data/cellmincer/logs
