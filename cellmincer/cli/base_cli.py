@@ -16,7 +16,8 @@ TOOL_NAME_LIST = [
     'preprocess',
     'feature',
     'train',
-    'denoise'
+    'denoise',
+    'insight'
 ]
 
 

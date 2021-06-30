@@ -13,15 +13,8 @@ import numpy as np
 import torch
 from typing import List
 
-from torch.optim.lr_scheduler import LambdaLR
-from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
-
 from cellmincer.containers import Noise2Self
-from cellmincer.models import DenoisingModel
-from cellmincer.util import \
-    OptopatchBaseWorkspace, \
-    OptopatchDenoisingWorkspace, \
-    crop_center
+from cellmincer.util import crop_center
     
 class Denoise:
     def __init__(

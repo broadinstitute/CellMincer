@@ -28,4 +28,7 @@ CellMincer provides the following tools:
 `denoise` uses a trained model to denoise VI-movies.
 `cellmincer denoise -i <path_to_config_yaml>`
 
+`insight` produces performance statistics.
+`cellmincer insight -i <path_to_config_yaml>`
+
 Template `.yaml` configurations are provided in `configs/`.

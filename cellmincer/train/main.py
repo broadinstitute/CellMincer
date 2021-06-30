@@ -16,12 +16,8 @@ from typing import List, Optional, Tuple
 from cellmincer.containers import Noise2Self
 from cellmincer.models import DenoisingModel, get_best_window_padding
 from cellmincer.util import \
-    OptopatchBaseWorkspace, \
-    OptopatchDenoisingWorkspace, \
     consts, \
     crop_center, \
-    get_nn_spatio_temporal_mean, \
-    get_nn_spatial_mean, \
     generate_optimizer, \
     generate_lr_scheduler, \
     generate_batch_indices, \
