@@ -1,0 +1,56 @@
+datasets:
+- optosynth_first_wave__1__20__50
+device: cuda
+log_dir: /home/jupyter/bw-data/cellmincer/logs
+model:
+  spatial_unet_activation: relu
+  spatial_unet_batch_norm: false
+  spatial_unet_depth: 3
+  spatial_unet_first_conv_channels: 32
+  spatial_unet_kernel_size: 3
+  spatial_unet_n_conv_layers: 3
+  spatial_unet_padding: true
+  spatial_unet_readout_kernel_size: 1
+  temporal_denoiser_activation: relu
+  temporal_denoiser_conv_channels: 32
+  temporal_denoiser_hidden_dense_layer_dims:
+  - 32
+  - 32
+  temporal_denoiser_kernel_size: 5
+  temporal_denoiser_n_conv_layers: 3
+  type: spatial-unet-2d-temporal-denoiser
+  use_attention: false
+  use_global_features: true
+  use_layer_norm: false
+  use_padding: false
+root_data_dir: /home/jupyter/bw-data/cellmincer/data
+root_model_dir: /home/jupyter/bw-data/cellmincer/models
+training:
+  continuity_reg_strength: 1.0
+  enable_continuity_reg: false
+  log_every: 100
+  loss_type: lp
+  lr_params:
+    max: 5.0e-05
+    type: const
+  n_batch_per_loop: 20
+  n_batch_validation: 10
+  n_frames_validation: 200
+  n_iters: 100000
+  n_loop: 1
+  noise_threshold_to_std: 0.05
+  norm_p: 2
+  occlusion_prob: 0.05
+  occlusion_radius: 0
+  occlusion_strategy: random
+  optim_params:
+    beta_hi: 0.999
+    beta_lo: 0.9
+    type: adam
+    weight_decay: 0.1
+  output_min_size_hi: 64
+  output_min_size_lo: 10
+  reg_func: clamped_linear
+  save_every: 10000
+  t_tandem: 0
+  validate_every: 100

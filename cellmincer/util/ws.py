@@ -2,17 +2,14 @@ import numpy as np
 from skimage.filters import threshold_otsu
 from boltons.cacheutils import cachedproperty
 import torch
+import tifffile
 import logging
 from typing import List, Tuple, Optional, Dict
 
-from .opto_utils import get_cosine_similarity_with_sequence_np
-from .opto_features import OptopatchGlobalFeatureContainer
+from .utils import get_cosine_similarity_with_sequence_np
+from .features import OptopatchGlobalFeatureContainer
 
-logger = logging.getLogger()
-
-
-def log_info(msg: str):
-    logger.warning(msg)
+from . import consts
 
 
 class OptopatchBaseWorkspace:
@@ -38,11 +35,11 @@ class OptopatchBaseWorkspace:
             n_frames: int,
             width: int,
             height: int,
-            order: str = 'tyx',
+            order: str = 'txy',
             dtype = np.float32,
             neighbor_dx_dy_list: List[Tuple[int, int]] = DEFAULT_NEIGHBOR_DX_DY_LIST):
         # load the movie
-        log_info(f"Loading movie from {movie_bin_path} ...")
+        logging.debug(f"Loading movie from {movie_bin_path} ...")
         shape_dict = {'x': width, 'y': height, 't': n_frames}
         shape = tuple(map(shape_dict.get, order))
         movie_nnn = np.fromfile(movie_bin_path, dtype=np.uint16).reshape(shape, order='C')
@@ -55,18 +52,51 @@ class OptopatchBaseWorkspace:
     @staticmethod
     def from_npy(
             movie_npy_path: str,
-            permutation: Optional[Tuple[int]] = None,
+            order: str = 'txy',
             dtype = np.float32,
             neighbor_dx_dy_list: List[Tuple[int, int]] = DEFAULT_NEIGHBOR_DX_DY_LIST):
         # load the movie
-        log_info(f"Loading movie from {movie_npy_path} ...")
-        movie_txy = np.load(movie_npy_path).astype(dtype)
-        if permutation is not None:
-            movie_txy = movie_txy.transpose(*permutation)
+        logging.debug(f"Loading movie from {movie_npy_path} ...")
+        movie_nnn = np.load(movie_npy_path).astype(dtype)
+        movie_txy = movie_nnn.transpose(tuple(map(order.find, 'txy')))
         return OptopatchBaseWorkspace(
             movie_txy=movie_txy,
             dtype=dtype,
-            neighbor_dx_dy_list=neighbor_dx_dy_list) 
+            neighbor_dx_dy_list=neighbor_dx_dy_list)
+    
+    @staticmethod
+    def from_npz(
+            movie_npz_path: str,
+            order: str = 'txy',
+            key = 'arr_0',
+            dtype = np.float32,
+            neighbor_dx_dy_list: List[Tuple[int, int]] = DEFAULT_NEIGHBOR_DX_DY_LIST):
+        # load the movie
+        logging.debug(f"Loading movie from {movie_npz_path} ...")
+        
+        npz_file = np.load(movie_npz_path)
+        movie_nnn = npz_file[key].astype(dtype)
+        npz_file.close()
+        movie_txy = movie_nnn.transpose(tuple(map(order.find, 'txy')))
+        return OptopatchBaseWorkspace(
+            movie_txy=movie_txy,
+            dtype=dtype,
+            neighbor_dx_dy_list=neighbor_dx_dy_list)
+    
+    @staticmethod
+    def from_tiff(
+            movie_tiff_path: str,
+            order: str = 'txy',
+            dtype = np.float32,
+            neighbor_dx_dy_list: List[Tuple[int, int]] = DEFAULT_NEIGHBOR_DX_DY_LIST):
+        # load the movie
+        logging.debug(f"Loading movie from {movie_tiff_path} ...")
+        movie_nnn = tifffile.imread(movie_tiff_path).astype(dtype)
+        movie_txy = movie_nnn.transpose(tuple(map(order.find, 'txy')))
+        return OptopatchBaseWorkspace(
+            movie_txy=movie_txy,
+            dtype=dtype,
+            neighbor_dx_dy_list=neighbor_dx_dy_list)
 
     def get_t_truncated_movie(self, t_mask: np.ndarray) -> 'OptopatchBaseWorkspace':
         return OptopatchBaseWorkspace(
@@ -93,25 +123,25 @@ class OptopatchBaseWorkspace:
     @cachedproperty
     def movie_t_mean_xy(self):
         """Temporal mean"""
-        log_info("Calculating temporal mean ...")
+        logging.debug("Calculating temporal mean ...")
         return np.mean(self.movie_txy, 0).astype(self.dtype)
     
     @cachedproperty
     def movie_t_std_xy(self):
         """Temporal std"""
-        log_info("Calculating temporal std ...")
+        logging.debug("Calculating temporal std ...")
         return np.std(self.movie_txy, 0).astype(self.dtype)
     
     @property
     def movie_zero_mean_txy(self):
         """Temporal zero-mean movie"""
-        log_info("Calculating zero-mean movie ...")
+        logging.debug("Calculating zero-mean movie ...")
         return (self.movie_txy - self.movie_t_mean_xy[None, ...]).astype(self.dtype)
     
     @cachedproperty
     def movie_t_corr_xy_list(self) -> List[np.ndarray]:
         """Peason correlation with nearest neighobrs"""
-        log_info("Calculating temporal correlation with neighbors ...")
+        logging.debug("Calculating temporal correlation with neighbors ...")
         movie_t_corr_xy_list = []
         movie_zero_mean_txy = self.movie_zero_mean_txy
         for dx, dy in self.neighbor_dx_dy_list:
@@ -176,8 +206,8 @@ class OptopatchGlobalFeaturesTorchCache:
             features: OptopatchGlobalFeatureContainer,
             x_padding: int,
             y_padding: int,
-            device: torch.device,
-            dtype: torch.dtype):
+            device: torch.device = consts.DEFAULT_DEVICE,
+            dtype: torch.dtype = consts.DEFAULT_DTYPE):
         self.x_padding = x_padding
         self.y_padding = y_padding
         self.device = device
@@ -214,8 +244,8 @@ class OptopatchDenoisingWorkspace:
                  features: OptopatchGlobalFeatureContainer,
                  x_padding: int,
                  y_padding: int,
-                 device: torch.device,
-                 dtype: torch.dtype):
+                 device: torch.device = consts.DEFAULT_DEVICE,
+                 dtype: torch.dtype = consts.DEFAULT_DTYPE):
         self.ws_base_diff = ws_base_diff
         self.ws_base_bg = ws_base_bg
         self.noise_params = noise_params
@@ -304,11 +334,14 @@ class OptopatchDenoisingWorkspace:
     
     def get_modeled_variance(
             self,
-            scaled_bg_movie_ntxy: torch.Tensor,
-            scaled_diff_movie_ntxy: torch.Tensor) -> torch.Tensor:
+            scaled_bg_movie_txy: torch.Tensor,
+            scaled_diff_movie_txy: torch.Tensor) -> torch.Tensor:
+        if self.noise_params is None:
+            raise Exception('Cannot model variance with undefined noise parameters')
+        
         s = self.cached_features.norm_scale
         var_ntxy = torch.clamp(
-            (self.noise_params['alpha_median'] * s * (scaled_bg_movie_ntxy + scaled_diff_movie_ntxy)
+            (self.noise_params['alpha_median'] * s * (scaled_bg_movie_txy + scaled_diff_movie_txy)
              + self.noise_params['beta_median']),
             min=self.noise_params['global_min_variance']) / (s ** 2)
         return var_ntxy

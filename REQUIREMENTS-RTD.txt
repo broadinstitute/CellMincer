@@ -1,0 +1,9 @@
+matplotlib
+numpy
+scipy
+torch
+boltons
+pyyaml
+scikit-image
+scikit-video
+cosine_annealing_warmup @ https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup/tarball/master#egg=cosine_annealing_warmup

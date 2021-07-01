@@ -1,0 +1,48 @@
+datasets:
+- optosynth_first_wave__1__20__50
+device: cuda
+log_dir: /home/jupyter/bw-data/cellmincer/logs
+model:
+  type: spatial-unet-2d-multiframe
+  unet_activation: relu
+  unet_batch_norm: false
+  unet_depth: 3
+  unet_first_conv_channels: 32
+  unet_kernel_size: 3
+  unet_n_conv_layers: 3
+  unet_padding: true
+  unet_readout_kernel_size: 1
+  use_attention: false
+  use_global_features: true
+  use_layer_norm: false
+  use_padding: false
+root_data_dir: /home/jupyter/bw-data/cellmincer/data
+root_model_dir: /home/jupyter/bw-data/cellmincer/models
+training:
+  continuity_reg_strength: 1.0
+  enable_continuity_reg: false
+  log_every: 100
+  loss_type: lp
+  lr_params:
+    max: 0.0001
+    type: const
+  n_batch_per_loop: 20
+  n_batch_validation: 20
+  n_iters: 100000
+  n_loop: 1
+  noise_threshold_to_std: 0.05
+  norm_p: 1
+  occlusion_prob: 0.05
+  occlusion_radius: 0
+  occlusion_strategy: random
+  optim_params:
+    momentum: 0.9
+    type: sgd
+  output_min_size_hi: 64
+  output_min_size_lo: 10
+  reg_func: clamped_linear
+  save_every: 10000
+  t_order: 13
+  t_tandem: 0
+  validate_every: 100
+  weight_decay: 0.1

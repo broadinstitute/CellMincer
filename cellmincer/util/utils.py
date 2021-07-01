@@ -1,7 +1,11 @@
+import os
+
 import numpy as np
 import torch
 from typing import Optional, Union, List, Tuple
 from bisect import bisect_left, bisect_right
+
+import logging
 
 
 def get_cosine_similarity_with_sequence_np(
@@ -80,14 +84,16 @@ def pad_images_torch(images_ncxy: torch.Tensor,
            margin_height:(source_height + margin_height)] = images_ncxy
     return output
 
-
+'''
+Crops the last two dimensions to the specified center window.
+'''
 def crop_center(input_ncxy: Union[torch.Tensor, np.ndarray],
                 target_width: int,
                 target_height: int) -> Union[torch.Tensor, np.ndarray]:
     input_width = input_ncxy.shape[-2]
     input_height = input_ncxy.shape[-1]
-    assert input_width >= target_width
-    assert input_height >= target_height
+    assert input_width >= target_width, f'input {input_width} smaller than target {target_width}'
+    assert input_height >= target_height, f'input {input_height} smaller than target {target_height}'
     margin_width = (input_width - target_width) // 2
     margin_height = (input_height - target_height) // 2
     if (margin_width == 0) and (margin_height == 0):
@@ -227,7 +233,7 @@ def rolling_circle_filter_torch(
     y_bg = torch.zeros_like(y)
     for i_x in range(n_points):
         if log_progress & (i_x % log_every == 0):
-            print(f"processing {i_x} / {n_points} ...")
+            logging.debug(f"processing {i_x} / {n_points} ...")
         pos = x_list[i_x]
         i_left, i_right = _get_overlapping_index_range(x_list, pos, radius_x)
         x_slice = x[i_left:i_right]

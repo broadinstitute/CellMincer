@@ -1,0 +1,9 @@
+datasets:
+- optosynth_first_wave__1__20__50
+- optosynth_first_wave__2__20__50
+- optosynth_first_wave__3__20__50
+- optosynth_first_wave__4__20__50
+- optosynth_first_wave__5__20__50
+device: cpu
+log_dir: /home/jupyter/bw-data/cellmincer/logs
+root_data_dir: /home/jupyter/bw-data/cellmincer/data
