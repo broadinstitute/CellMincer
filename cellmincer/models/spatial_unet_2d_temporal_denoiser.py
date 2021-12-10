@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from torch import nn
 from typing import Dict, List, Optional, Tuple, Union
+from pytorch_lightning import LightningModule
 
 from torchinfo import summary
 
@@ -248,3 +249,156 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
             ds_rate=2)
         padding = (input_size - output_min_size) // 2
         return padding
+
+
+# Dataloader return movie slices
+# In model training step you do occlusion of pixel
+#
+
+class PlSpatialUnet2dTemporalDenoiser(LightningModule):
+    def __init__(
+            self,
+            config_model: dict,
+            config_train: dict,
+            device: torch.device,
+            dtype: torch.dtype):
+
+        self.config_model = config_model
+        self.config_train = config_train
+        self.denoising_model = SpatialUnet2dTemporalDenoiser(config, device, dtype)
+
+    def compute_noise2self_loss(self,
+                                batch_data,
+                                ws_denoising_list: List[OptopatchDenoisingWorkspace],
+                                denoising_model,
+                                loss_type: str,
+                                norm_p: int,
+                                enable_continuity_reg: bool,
+                                reg_func: str,
+                                continuity_reg_strength: float,
+                                noise_threshold_to_std: float):
+            """Calculates the loss of a Noise2Self predictor on a given minibatch."""
+
+            assert reg_func in {'clamped_linear', 'tanh'}
+            assert loss_type in {'lp', 'poisson_gaussian'}
+
+            # iterate over the middle frames and accumulate loss
+            def _compute_lp_loss(_err, _norm_p=norm_p, _scale=1.):
+                return (_scale * (_err.abs() + const.EPS).pow(_norm_p)).sum()
+
+            x_window, y_window = batch_data['x_window'], batch_data['y_window']
+            total_pixels = x_window * y_window
+
+            # TODO FIX ME
+
+            t_total = batch_data['padded_sliced_diff_movie_ntxy'].shape[1]
+            t_tandem = t_total - denoising_model.t_order
+            t_mid = (denoising_model.t_order - 1) // 2
+
+            # fetch and crop the dataset std (for regularization)
+            if enable_continuity_reg:
+                cropped_movie_t_std_nxy = crop_center(
+                    batch_data['padded_global_features_nfxy'][:, batch_data['detrended_std_feature_index'], ...],
+                    target_width=x_window,
+                    target_height=y_window)
+
+            reg_loss = None
+            rec_loss = None
+
+            cropped_mask_ntxy = crop_center(
+                batch_data['padded_occlusion_masks_ntxy'],
+                target_width=x_window,
+                target_height=y_window)
+
+            expected_output_ntxy = crop_center(
+                batch_data['padded_middle_frames_ntxy'],
+                target_width=x_window,
+                target_height=y_window)
+
+            # reconstruction losses
+            total_masked_pixels_t = cropped_mask_ntxy.sum(dim=(0, 2, 3)).type(denoising_model.dtype)
+            loss_scale_t = 1. / ((t_tandem + 1) * (const.EPS + total_masked_pixels_t))
+            loss_scale_ntxy = loss_scale_t[None, :, None, None]
+
+            # calculate the loss on occluded points of the middle frames
+            # and total variation loss between frames (if enabled)
+            if loss_type == 'poisson_gaussian':
+                var_ntxy = torch.cat([
+                    ws_denoising_list[i_dataset].get_modeled_variance(
+                        scaled_bg_movie_txy=crop_center(
+                            batch_data['padded_sliced_bg_movie_ntxy'][i_dataset, t_mid:t_mid + t_tandem + 1, ...],
+                            target_width=x_window,
+                            target_height=y_window),
+                        scaled_diff_movie_txy=denoised_batch_ntxy[i_dataset, ...])
+                    for i_dataset in batch_data['dataset_indices']], dim=0).unsqueeze(1)
+                rec_loss = get_poisson_gaussian_nll(
+                    var_ntxy=var_ntxy,
+                    pred_ntxy=denoised_batch_ntxy,
+                    obs_ntxy=expected_output_ntxy,
+                    mask_ntxy=cropped_mask_ntxy,
+                    scale_ntxy=loss_scale_ntxy).sum()
+
+            elif loss_type == 'lp':
+                err_ntxy = cropped_mask_ntxy * (denoised_batch_ntxy - expected_output_ntxy)
+                rec_loss = _compute_lp_loss(_err=err_ntxy, _norm_p=norm_p, _scale=loss_scale_ntxy)
+
+            else:
+                raise ValueError('Unrecognized loss type.')
+
+            if enable_continuity_reg:
+                total_variation_ntxy = get_total_variation(
+                    dt_frame_ntxy=denoised_batch_ntxy[:, 1:, ...] - denoised_batch_ntxy[:, :-1, ...],
+                    noise_std_nxy=cropped_movie_t_std_nxy,
+                    noise_threshold_to_std=noise_threshold_to_std,
+                    reg_func=reg_func)
+
+                reg_loss = _compute_lp_loss(
+                    _err=total_variation_ntxy,
+                    _norm_p=norm_p,
+                    _scale=continuity_reg_strength / ((
+                                                                  t_tandem + 1) * total_pixels))  # TODO check with mehrtash on change from (t_tandem - 1)
+
+            return {'rec_loss': rec_loss, 'reg_loss': reg_loss}
+
+    def forward(self,
+                x: torch.Tensor,
+                features: Optional[torch.Tensor] = None):
+
+        denoised_batch_ntxy = self.denoising_model(x=x, features=features)
+        denoised_batch_ntxy = crop_center(
+            denoised_batch_ntxy,
+            target_width=x_window,
+            target_height=y_window)
+
+        return denoised_batch_ntxy
+
+    def training_step(self, batch, batch_idx) -> torch.Tensor:
+        # batch is what the dataloader provides -> movie slice
+
+        occluded_movie = ......
+        denoised_batch_ntxy = self(occluded_movie)
+        loss_dict = self.compute_noise2self_loss(denoised_batch_ntxy, batch)
+
+        loss = loss_dict["rec_loss"] + loss_dict["reg_loss"]
+        return loss
+
+    def validation_step(self, batch, batch_idx, dataloader_idx: int = -1) -> Any:
+        # If not defined. It will run the forward method
+        pass
+
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+
+        optim = generate_optimizer(
+            denoising_model=self.denoising_model,
+            optim_params=self.train_config['optim_params'],
+            lr=self.train_config['lr_params']['max'])
+        sched = generate_lr_scheduler(
+            optim=self.optim,
+            lr_params=self.train_config['lr_params'],
+            n_iters=self.train_config['n_iters'])
+
+        return [optim], [sched]
+
+
+
+

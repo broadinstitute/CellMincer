@@ -5,6 +5,8 @@ from skimage.filters import threshold_otsu
 import torch
 import logging
 from typing import List, Tuple, Optional, Union, Dict
+import pytorch_lightning as pl
+from torch.utils.data import Dataset, Dataloader
 
 from torch.optim.lr_scheduler import LambdaLR
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
@@ -63,6 +65,52 @@ def generate_batch_indices(
     frame_indices = np.random.randint(t_mid, n_frame_array[dataset_indices] - t_mid)
     
     return dataset_indices, frame_indices
+
+
+class DataLoaderWithLoad(DataLoader):
+    def load(self, index: Union[List[int], torch.Tensor]):
+        tmp = []
+        for idx in index:
+            tmp.append(self.dataset.__getitem__(idx))
+        return self.collate_fn(tmp)
+
+
+class MovieDataset(Dataset):
+    def __init__(self, paths, mutiplicative_factor: int):
+        self.paths = paths
+        self.multiplicative_factor = mutiplicative_factor
+
+    def __len__(self):
+        return len(self.paths) * self.multiplicative_factor
+
+    def __generate_random_slice__(self):
+        # some stuff
+        return  stuff
+        
+    def __getitem__(self, item):
+        new_item = item % len(self.paths)  # this is always in (0,..., len(self.poaths) -1)
+        path = self.paths[new_item]
+        random_slice = self.__generate_random_slice__()
+        return numpy.read(path, random_slice) # add fancy slicing
+
+
+class MovieDM(pl.LightningDataModule):
+    def __init__(self, factor: int):
+        self.factor = factor
+
+    def prepare_data(self):
+        # these are things to be done only once in distributed settings.
+        # If you need to preprocess and write to disk to it here.
+        # write numpy array to disk
+        self.paths = ["array1.npz", "..."]
+
+
+    def train_dataloader(self) -> "torch.dataloader":
+        train_dataset = MovieDataset(paths=self.paths, multiplicative_factor=factor)
+        return DataLoaderWithLoad(dataset=train_dataset, batch_size=...., num_workers=8, pin_memory=True, drop_last=True, shuffle=True)
+
+
+    def val_dataloader(self) -> "torch.dataloader":
 
 
 def generate_occluded_training_data(
