@@ -37,9 +37,7 @@ class GUNet(nn.Module):
             p_dropout: float = 0.0,
             readout_hidden_layer_channels_list: List[int] = [],
             readout_kernel_size: int = 1,
-            activation: nn.Module = nn.SELU(),
-            device: torch.device = torch.device('cuda'),
-            dtype: torch.dtype = torch.float32):
+            activation: nn.Module = nn.SELU()):
         super(GUNet, self).__init__()
         
         assert feature_mode in {'repeat', 'once', 'none'}
@@ -74,8 +72,6 @@ class GUNet(nn.Module):
         elif pool_mode == 'avg':
             self.pool = _AVG_POOL_DICT[data_dim]
         self.drop = nn.Dropout2d(p=p_dropout)
-        self.device = device
-        self.dtype = dtype
         
         # downward path
         prev_channels = in_channels
@@ -148,9 +144,6 @@ class GUNet(nn.Module):
         self.readout = nn.Sequential(*readout)
         self.final_trans = final_trans
         
-        self.to(device)
-        self.type(dtype)
-        
         if feature_channels == 0:
             self.forward = self._forward
         else:
@@ -179,7 +172,7 @@ class GUNet(nn.Module):
             bridge = self.drop(torch.cat([features_list[-i - 1], block_list[-i - 1]], - self.data_dim - 1))
             if self.noise_channels > 0:
                 noise_shape = (x.shape[0], self.noise_channels,) + x.shape[-self.data_dim:]
-                noise = torch.randn(noise_shape, device=self.device, dtype=self.dtype)
+                noise = torch.randn(noise_shape)
                 x = torch.cat([noise, x], - self.data_dim - 1)
             x = up_op(x, bridge)
             
@@ -204,7 +197,7 @@ class GUNet(nn.Module):
             bridge = block_list[-i - 1]
             if self.noise_channels > 0:
                 noise_shape = (x.shape[0], self.noise_channels,) + x.shape[-self.data_dim:]
-                noise = torch.randn(noise_shape, device=self.device, dtype=self.dtype)
+                noise = torch.randn(noise_shape)
                 x = torch.cat([noise, x], - self.data_dim - 1)
             x = up_op(x, bridge)
             

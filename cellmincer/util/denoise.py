@@ -22,29 +22,6 @@ from .utils import \
 
 from . import const
 
-def generate_bernoulli_mask(
-        p: float,
-        n_batch: int,
-        width: int,
-        height: int,
-        device: torch.device = const.DEFAULT_DEVICE,
-        dtype: torch.dtype = const.DEFAULT_DTYPE) -> torch.Tensor:
-    return torch.distributions.Bernoulli(
-        probs=torch.tensor(p, device=device, dtype=dtype)).sample(
-        [n_batch, width, height]).type(dtype)
-
-
-def inflate_binary_mask(mask_mxy: torch.Tensor, radius: int):
-    assert radius >= 0
-    if radius == 0:
-        return mask_mxy
-    device = mask_mxy.device
-    x = torch.arange(-radius, radius + 1, dtype=torch.float, device=device)[None, :]
-    y = torch.arange(-radius, radius + 1, dtype=torch.float, device=device)[:, None]
-    struct = ((x.pow(2) + y.pow(2)) <= (radius ** 2)).float()
-    kern = struct[None, None, ...]
-    return (torch.nn.functional.conv2d(mask_mxy.unsqueeze(dim=1), kern, padding=radius) > 0).squeeze(dim=1).type(mask_mxy.dtype)
-
 
 def generate_batch_indices(
         ws_denoising_list: List[OptopatchDenoisingWorkspace],
@@ -151,7 +128,6 @@ def generate_occluded_training_data(
     padded_y_window = y_window + 2 * y_padding
     
     n_datasets = len(ws_denoising_list)
-    n_global_features = ws_denoising_list[0].n_global_features
     t_total = t_order + t_tandem
     
     tandem_start = t_order // 2

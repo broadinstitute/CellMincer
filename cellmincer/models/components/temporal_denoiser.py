@@ -14,9 +14,7 @@ class TemporalDenoiser(nn.Module):
             hidden_conv_channels: int,
             hidden_dense_layer_dims: List[int],
             activation: nn.Module,
-            final_trans: nn.Module,
-            device: torch.device,
-            dtype: torch.dtype):
+            final_trans: nn.Module):
         super(TemporalDenoiser, self).__init__()
         
         assert t_order % 2 == 1
@@ -53,8 +51,6 @@ class TemporalDenoiser(nn.Module):
         self.conv_block = nn.Sequential(*conv_blocks)
         self.dense_block = nn.Sequential(*dense_blocks)
         self.final_trans = final_trans
-        
-        self.to(device)
         
     def forward(self, x):
         """
