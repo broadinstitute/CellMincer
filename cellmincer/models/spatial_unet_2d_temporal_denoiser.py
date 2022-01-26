@@ -1,8 +1,10 @@
 import numpy as np
 import torch
 from torch import nn
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 from pytorch_lightning import LightningModule
+from pytorch_lightning.loggers import NeptuneLogger
 
 from torchinfo import summary
 
@@ -16,7 +18,10 @@ from .denoising_model import DenoisingModel
 
 from cellmincer.util import \
     OptopatchDenoisingWorkspace, \
-    crop_center
+    const, \
+    crop_center, \
+    generate_lr_scheduler, \
+    generate_optimizer
 
 
 class SpatialUnet2dTemporalDenoiser(DenoisingModel):
@@ -24,13 +29,9 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
             self,
             config: dict):
         
-        t_order = (1 +
-            (config['temporal_denoiser_kernel_size'] - 1) *
-            (config['temporal_denoiser_n_conv_layers']))
-        
         super(SpatialUnet2dTemporalDenoiser, self).__init__(
             name=config['type'],
-            t_order=t_order)
+            t_order=SpatialUnet2dTemporalDenoiser.get_temporal_order_from_config(config))
         
         self.feature_mode = config['spatial_unet_feature_mode']
         assert self.feature_mode in {'repeat', 'once', 'none'}
@@ -72,11 +73,11 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
     def forward(
             self,
             x: torch.Tensor,
-            features: Optional[torch.Tensor] = None) -> torch.Tensor:
+            features: torch.Tensor) -> torch.Tensor:
         assert not(self.feature_mode != 'none' and (features is None))
         
         t_total = x.shape[1]
-        t_tandem = t_total - self.t_order
+        t_tandem = t_total - self.t_order + 1
 
         # calculate processed features
         unet_output_list = [(
@@ -88,7 +89,7 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
         # compute temporal-denoised convolutions for all t_order-length windows
         temporal_endpoint_ntxy = torch.stack([
             self.temporal_denoiser(unet_features_nctxy[:, :, i_t:(i_t + self.t_order), :, :])
-            for i_t in range(t_tandem + 1)], dim=1)
+            for i_t in range(t_tandem)], dim=1)
             
         return temporal_endpoint_ntxy
 
@@ -228,6 +229,12 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
             ds_rate=self.spatial_unet.ds_rate)
         padding = (input_size - output_min_size) // 2
         return padding
+    
+    @staticmethod
+    def get_temporal_order_from_config(config: dict) -> int:
+        return (1 +
+            (config['temporal_denoiser_kernel_size'] - 1) *
+            (config['temporal_denoiser_n_conv_layers']))
 
     @staticmethod
     def get_window_padding_from_config(
@@ -252,167 +259,113 @@ class PlSpatialUnet2dTemporalDenoiser(LightningModule):
             self,
             model_config: dict,
             train_config: dict):
-
+        super(PlSpatialUnet2dTemporalDenoiser, self).__init__()
+        
         self.train_config = train_config
-        self.denoising_model = SpatialUnet2dTemporalDenoiser(model_config)
+        self.neptune_run_id = None
+        self.denoising_model = nn.SyncBatchNorm.convert_sync_batchnorm(SpatialUnet2dTemporalDenoiser(model_config))
 
     def forward(self,
                 x: torch.Tensor,
                 features: Optional[torch.Tensor] = None):
         return crop_center(
             self.denoising_model(x=x, features=features),
-            target_width=x_window,
-            target_height=y_window)
+            target_width=self.train_config['x_window'],
+            target_height=self.train_config['y_window'])
 
     def training_step(self, batch, batch_idx) -> torch.Tensor:
         # batch is what the dataloader provides -> movie slice
 
-        occluded_movie = ......
-        denoised_batch_ntxy = self(occluded_movie)
-        loss_dict = self._compute_noise2self_loss(denoised_batch_ntxy, batch)
+        occluded_batch = self._occlude_data(batch)
+        denoised_output_ntxy = self(occluded_batch['padded_diff'], batch['features'])
+        loss_dict = self._compute_noise2self_loss(
+            denoised_output_ntxy,
+            expected_output_ntxy=occluded_batch['middle_frames'],
+            occlusion_masks=occluded_batch['occlusion_masks'])
 
         loss = loss_dict["rec_loss"]
+        self.log('train/loss', loss.item())
+        self.logger.experiment['train/loss'].log(loss.item())
         return loss
 
     def validation_step(self, batch, batch_idx, dataloader_idx: int = -1) -> Any:
-        # If not defined. It will run the forward method
         pass
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
-
         optim = generate_optimizer(
             denoising_model=self.denoising_model,
             optim_params=self.train_config['optim_params'],
             lr=self.train_config['lr_params']['max'])
         sched = generate_lr_scheduler(
-            optim=self.optim,
+            optim=optim,
             lr_params=self.train_config['lr_params'],
             n_iters=self.train_config['n_iters'])
 
         return [optim], [sched]
 
     def _compute_noise2self_loss(self,
-            denoised_batch_ntxy,
-            expected_batch_ntxy,
-            occlusion_masks,
-            ws_denoising_list: List[OptopatchDenoisingWorkspace],
-            loss_type: str,
-            norm_p: int,
-            enable_continuity_reg: bool,
-            reg_func: str,
-            continuity_reg_strength: float,
-            noise_threshold_to_std: float):
+            denoised_output_ntxy,
+            expected_output_ntxy,
+            occlusion_masks):
         """Calculates the loss of a Noise2Self predictor on a given minibatch."""
 
-        assert reg_func in {'clamped_linear', 'tanh'}
-        assert loss_type in {'lp', 'poisson_gaussian'}
-
         # iterate over the middle frames and accumulate loss
-        def _compute_lp_loss(_err, _norm_p=norm_p, _scale=1.):
+        def _compute_lp_loss(_err, _norm_p, _scale=1.):
             return (_scale * (_err.abs() + const.EPS).pow(_norm_p)).sum()
 
-        x_window, y_window = batch_data['x_window'], batch_data['y_window']
+        x_window, y_window = self.train_config['x_window'], self.train_config['y_window']
         total_pixels = x_window * y_window
-
-        t_total = batch_data['padded_sliced_diff_movie_ntxy'].shape[1]
-        t_tandem = t_total - self.denoising_model.t_order
-        t_mid = (self.denoising_model.t_order - 1) // 2
-
-        # fetch and crop the dataset std (for regularization)
-        if enable_continuity_reg:
-            cropped_movie_t_std_nxy = crop_center(
-                batch_data['padded_global_features_nfxy'][:, batch_data['detrended_std_feature_index'], ...],
-                target_width=x_window,
-                target_height=y_window)
-
-        reg_loss = None
-        rec_loss = None
-
-        cropped_mask_ntxy = crop_center(
-            batch_data['padded_occlusion_masks_ntxy'],
-            target_width=x_window,
-            target_height=y_window)
-
-        expected_output_ntxy = crop_center(
-            batch_data['padded_middle_frames_ntxy'],
-            target_width=x_window,
-            target_height=y_window)
+        t_tandem = denoised_output_ntxy.shape[1] - self.denoising_model.t_order + 1
 
         # reconstruction losses
-        total_masked_pixels_t = cropped_mask_ntxy.sum(dim=(0, 2, 3))
-        loss_scale_t = 1. / ((t_tandem + 1) * (const.EPS + total_masked_pixels_t))
+        total_masked_pixels_t = occlusion_masks.sum(dim=(0, 2, 3))
+        loss_scale_t = 1. / (t_tandem * (const.EPS + total_masked_pixels_t))
         loss_scale_ntxy = loss_scale_t[None, :, None, None]
 
-        # calculate the loss on occluded points of the middle frames
-        # and total variation loss between frames (if enabled)
-        if loss_type == 'poisson_gaussian':
-            var_ntxy = torch.cat([
-                ws_denoising_list[i_dataset].get_modeled_variance(
-                    scaled_bg_movie_txy=crop_center(
-                        batch_data['padded_sliced_bg_movie_ntxy'][i_dataset, t_mid:t_mid + t_tandem + 1, ...],
-                        target_width=x_window,
-                        target_height=y_window),
-                    scaled_diff_movie_txy=denoised_batch_ntxy[i_dataset, ...])
-                for i_dataset in batch_data['dataset_indices']], dim=0).unsqueeze(1)
-            rec_loss = get_poisson_gaussian_nll(
-                var_ntxy=var_ntxy,
-                pred_ntxy=denoised_batch_ntxy,
-                obs_ntxy=expected_output_ntxy,
-                mask_ntxy=cropped_mask_ntxy,
-                scale_ntxy=loss_scale_ntxy).sum()
+        err_ntxy = occlusion_masks * (denoised_output_ntxy - expected_output_ntxy)
+        rec_loss = _compute_lp_loss(_err=err_ntxy, _norm_p=self.train_config['norm_p'], _scale=loss_scale_ntxy)
 
-        elif loss_type == 'lp':
-            err_ntxy = cropped_mask_ntxy * (denoised_batch_ntxy - expected_output_ntxy)
-            rec_loss = _compute_lp_loss(_err=err_ntxy, _norm_p=norm_p, _scale=loss_scale_ntxy)
+        return {'rec_loss': rec_loss}
 
-        else:
-            raise ValueError('Unrecognized loss type.')
-
-        if enable_continuity_reg:
-            total_variation_ntxy = get_total_variation(
-                dt_frame_ntxy=denoised_batch_ntxy[:, 1:, ...] - denoised_batch_ntxy[:, :-1, ...],
-                noise_std_nxy=cropped_movie_t_std_nxy,
-                noise_threshold_to_std=noise_threshold_to_std,
-                reg_func=reg_func)
-
-            reg_loss = _compute_lp_loss(
-                _err=total_variation_ntxy,
-                _norm_p=norm_p,
-                _scale=continuity_reg_strength / ((t_tandem + 1) * total_pixels))  # TODO check with mehrtash on change from (t_tandem - 1)
-
-        return {'rec_loss': rec_loss, 'reg_loss': reg_loss}
-
-    def _occlude_data(self, padded_diff_movie_ntxy, features_nfxy):
+    def _occlude_data(self, batch):
         def _generate_bernoulli_mask(
                 p: float,
                 n_batch: int,
+                t_tandem: int,
                 width: int,
                 height: int) -> torch.Tensor:
             return torch.distributions.Bernoulli(
                 probs=torch.tensor(p)).sample(
-                [n_batch, width, height])
+                [n_batch, t_tandem, width, height]).to(self.device)
+        
+        padded_diff_movie_ntxy = batch['padded_diff']
+        features_nfxy = batch['features']
+        trend_mean_feature_index = batch['trend_mean_feature_index']
+        detrended_std_feature_index = batch['detrended_std_feature_index']
 
-        x_window, y_window = None, None
+        x_window, y_window = self.train_config['x_window'], self.train_config['y_window']
+        x_padding, y_padding = self.train_config['x_padding'], self.train_config['y_padding']
+        occlusion_prob = self.train_config['occlusion_prob']
         padded_x_window = x_window + 2 * x_padding
         padded_y_window = y_window + 2 * y_padding
         
         tandem_start = self.denoising_model.t_order // 2
-        tandem_end = tandem_start + t_tandem + 1
-        t_mid = t_total // 2
+        tandem_end = padded_diff_movie_ntxy.shape[1] - tandem_start
         
         middle_frames_ntxy = padded_diff_movie_ntxy[:, tandem_start:tandem_end, x_padding:-x_padding, y_padding:-y_padding].clone()
 
+        n_batch, t_tandem = middle_frames_ntxy.shape[:2]
+        
         # generate a uniform bernoulli mask
-        n_total_masks = n_batch * (t_tandem + 1)
-        occlusion_masks_mxy = _generate_bernoulli_mask(
+        occlusion_masks_ntxy = _generate_bernoulli_mask(
             p=occlusion_prob,
-            n_batch=n_total_masks,
+            n_batch=n_batch,
+            t_tandem=t_tandem,
             width=x_window,
             height=y_window)
-        occlusion_masks_ntxy = occlusion_masks_mxy.view(n_batch, t_tandem + 1, x_window, y_window)
         occlusion_masks_ntxy.type_as(padded_diff_movie_ntxy)
         
-        padded_occlusion_masks_ntxy = torch.zeros(n_batch, t_tandem + 1, padded_x_window, padded_y_window)
+        padded_occlusion_masks_ntxy = torch.zeros(n_batch, t_tandem, padded_x_window, padded_y_window, device=self.device)
         padded_occlusion_masks_ntxy[..., x_padding:-x_padding, y_padding:-y_padding] = occlusion_masks_ntxy
         padded_occlusion_masks_ntxy.type_as(padded_diff_movie_ntxy)
 
@@ -420,11 +373,20 @@ class PlSpatialUnet2dTemporalDenoiser(LightningModule):
             (1 - padded_occlusion_masks_ntxy) * padded_diff_movie_ntxy[:, tandem_start:tandem_end, :, :]
             + padded_occlusion_masks_ntxy * torch.distributions.Normal(
                 loc=features_nfxy[:, trend_mean_feature_index, :, :][:, None, ...].expand(
-                    n_batch, t_tandem + 1, padded_x_window, padded_y_window),
+                    n_batch, t_tandem, padded_x_window, padded_y_window),
                 scale=features_nfxy[:, detrended_std_feature_index, :, :][:, None, ...].expand(
-                    n_batch, t_tandem + 1, padded_x_window, padded_y_window) + const.EPS).sample())
+                    n_batch, t_tandem, padded_x_window, padded_y_window) + const.EPS).sample())
 
         return {
-            'padded_diff_movie': padded_diff_movie_ntxy,
+            'padded_diff': padded_diff_movie_ntxy,
             'middle_frames': middle_frames_ntxy,
             'occlusion_masks': occlusion_masks_ntxy}
+    
+    def on_save_checkpoint(self, checkpoint):
+        checkpoint['train_config'] = self.train_config
+        if isinstance(self.logger, NeptuneLogger):
+            checkpoint['neptune_run_id'] = self.logger.run._short_id
+
+    def on_load_checkpoint(self, checkpoint):
+        self.train_config = checkpoint['train_config']
+        self.neptune_run_id = checkpoint.get('neptune_run_id', None)

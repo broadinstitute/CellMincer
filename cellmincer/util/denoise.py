@@ -5,8 +5,6 @@ from skimage.filters import threshold_otsu
 import torch
 import logging
 from typing import List, Tuple, Optional, Union, Dict
-import pytorch_lightning as pl
-from torch.utils.data import Dataset, Dataloader
 
 from torch.optim.lr_scheduler import LambdaLR
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
@@ -44,50 +42,6 @@ def generate_batch_indices(
     return dataset_indices, frame_indices
 
 
-class DataLoaderWithLoad(DataLoader):
-    def load(self, index: Union[List[int], torch.Tensor]):
-        tmp = []
-        for idx in index:
-            tmp.append(self.dataset.__getitem__(idx))
-        return self.collate_fn(tmp)
-
-
-class MovieDataset(Dataset):
-    def __init__(self, paths, mutiplicative_factor: int):
-        self.paths = paths
-        self.multiplicative_factor = mutiplicative_factor
-
-    def __len__(self):
-        return len(self.paths) * self.multiplicative_factor
-
-    def __generate_random_slice__(self):
-        # some stuff
-        return  stuff
-        
-    def __getitem__(self, item):
-        new_item = item % len(self.paths)  # this is always in (0,..., len(self.poaths) -1)
-        path = self.paths[new_item]
-        random_slice = self.__generate_random_slice__()
-        return numpy.read(path, random_slice) # add fancy slicing
-
-
-class MovieDM(pl.LightningDataModule):
-    def __init__(self, factor: int):
-        self.factor = factor
-
-    def prepare_data(self):
-        # these are things to be done only once in distributed settings.
-        # If you need to preprocess and write to disk to it here.
-        # write numpy array to disk
-        self.paths = ["array1.npz", "..."]
-
-
-    def train_dataloader(self) -> "torch.dataloader":
-        train_dataset = MovieDataset(paths=self.paths, multiplicative_factor=factor)
-        return DataLoaderWithLoad(dataset=train_dataset, batch_size=...., num_workers=8, pin_memory=True, drop_last=True, shuffle=True)
-
-
-    def val_dataloader(self) -> "torch.dataloader":
 
 
 def generate_occluded_training_data(
@@ -105,7 +59,6 @@ def generate_occluded_training_data(
         occlusion_strategy: str,
         dataset_indices: np.ndarray = None,
         frame_indices: np.ndarray = None,
-        device: torch.device = const.DEFAULT_DEVICE,
         dtype: torch.dtype = const.DEFAULT_DTYPE):
     """Generates minibatches with appropriate occlusion and padding for training a blind
     denoiser. Supports multiple datasets.
@@ -163,7 +116,6 @@ def generate_occluded_training_data(
         n_batch=n_total_masks,
         width=x_window,
         height=y_window,
-        device=device,
         dtype=dtype)
     inflated_occlusion_masks_mxy = inflate_binary_mask(
         occlusion_masks_mxy, occlusion_radius)
@@ -214,13 +166,13 @@ def generate_occluded_training_data(
         images_ncxy=occlusion_masks_ntxy,
         target_width=padded_x_window,
         target_height=padded_y_window,
-        pad_value_nc=torch.zeros(n_batch, t_tandem + 1, device=device, dtype=dtype))
+        pad_value_nc=torch.zeros(n_batch, t_tandem + 1, dtype=dtype))
     
     padded_inflated_occlusion_masks_ntxy = pad_images_torch(
         images_ncxy=inflated_occlusion_masks_ntxy,
         target_width=padded_x_window,
         target_height=padded_y_window,
-        pad_value_nc=torch.zeros(n_batch, t_tandem + 1, device=device, dtype=dtype))
+        pad_value_nc=torch.zeros(n_batch, t_tandem + 1, dtype=dtype))
     
     if occlusion_strategy == 'nn-average':
         padded_sliced_diff_movie_ntxy[
@@ -417,9 +369,7 @@ def generate_lr_scheduler(
         optim: torch.optim.Optimizer,
         lr_params: dict,
         n_iters: int):
-    if lr_params['type'] == 'const':
-        sched = LambdaLR(optim, lr_lambda=lambda it: 1)
-    elif lr_params['type'] == 'cosine-annealing-warmup':
+    if lr_params['type'] == 'cosine-annealing-warmup':
         sched = CosineAnnealingWarmupRestarts(
             optim,
             first_cycle_steps=n_iters,

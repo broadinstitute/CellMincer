@@ -57,6 +57,13 @@ class DenoisingModel(pl.LightningModule):
         raise NotImplementedError
 
     '''
+    Returns the temporal order of a model with given configuration.
+    '''
+    @staticmethod
+    def get_temporal_order_from_config(config: dict) -> int:
+        raise NotImplementedError
+
+    '''
     Returns the padding size for an image dimension
     with given minimum output size and model configuration.
     '''

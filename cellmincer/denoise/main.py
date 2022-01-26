@@ -13,7 +13,6 @@ import numpy as np
 import torch
 from typing import List, Optional
 
-from cellmincer.containers import Noise2Self
 from cellmincer.util import crop_center
     
 class Denoise:
@@ -39,9 +38,9 @@ class Denoise:
                 self.window['y0']:self.window['y0'] + self.window['y_window']]
         self.peak = peak
         
-        ws_denoising_list, self.denoising_model = Noise2Self(
-            datasets=[input_dir],
-            config=config).get_resources()
+        ws_denoising_list, self.denoising_model = None, None #Noise2Self(
+#             datasets=[input_dir],
+#             config=config).get_resources()
         self.ws_denoising = ws_denoising_list[0]
         self.denoising_model.load_state_dict(torch.load(model_state))
     

@@ -63,12 +63,12 @@ def add_subparser_args(subparsers: argparse) -> argparse:
         help='Checkpoint file for resuming training.')
 
     subparser.add_argument(
-        '--temp',
+        '--gpus',
         nargs=None,
-        type=str,
-        dest='temp',
-        default=None,
+        type=int,
+        dest='gpus',
+        default=1,
         required=False,
-        help='Directory for large temporary training files.')
+        help='Number of GPUs to use for training.')
 
     return subparsers
