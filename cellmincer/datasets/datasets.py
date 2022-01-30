@@ -44,14 +44,14 @@ class MovieDataset(Dataset):
             y_window: int,
             x_padding: int,
             y_padding: int,
-            t_order: int,
+            t_total: int,
             multiplier: int):
         self.ws_denoising_list = ws_denoising_list
         self.x_window = x_window
         self.y_window = y_window
         self.x_padding = x_padding
         self.y_padding = y_padding
-        self.t_order = t_order
+        self.t_total = t_total
         self.multiplier = multiplier
 
     def __len__(self):
@@ -63,13 +63,13 @@ class MovieDataset(Dataset):
 
     def _generate_random_slice(self, movie_idx):
         n_frames, width, height = self.ws_denoising_list[movie_idx].shape
-        t0 = np.random.randint(n_frames - self.t_order + 1)
+        t0 = np.random.randint(n_frames - self.t_total + 1)
         x0 = np.random.randint(width - self.x_window + 1)
         y0 = np.random.randint(height - self.y_window + 1)
         diff_movie_slice_1txy = self.ws_denoising_list[movie_idx].get_movie_slice(
             include_bg=False,
             t_begin_index=t0,
-            t_end_index=t0 + self.t_order,
+            t_end_index=t0 + self.t_total,
             x0=x0,
             y0=y0,
             x_window=self.x_window,
@@ -100,7 +100,7 @@ class MovieDataModule(LightningDataModule):
             y_window: int,
             x_padding: int,
             y_padding: int,
-            t_order: int,
+            t_total: int,
             n_batch: int,
             multiplier: Optional[int] = None):
         self.ws_denoising_list = ws_denoising_list
@@ -108,7 +108,7 @@ class MovieDataModule(LightningDataModule):
         self.y_window = y_window
         self.x_padding = x_padding
         self.y_padding = y_padding
-        self.t_order = t_order
+        self.t_total = t_total
         self.n_batch = n_batch
         self.multiplier = multiplier if multiplier else n_batch
     
@@ -119,7 +119,7 @@ class MovieDataModule(LightningDataModule):
             y_window=self.y_window,
             x_padding=self.x_padding,
             y_padding=self.y_padding,
-            t_order=self.t_order,
+            t_total=self.t_total,
             multiplier=self.multiplier)
     
     def train_dataloader(self) -> "torch.dataloader":
@@ -188,6 +188,6 @@ def build_datamodule(
         y_window=train_config['y_window'],
         x_padding=train_config['x_padding'],
         y_padding=train_config['y_padding'],
-        t_order=get_temporal_order_from_config(model_config),
+        t_total=get_temporal_order_from_config(model_config) + train_config['t_tandem'] - 1,
         n_batch=train_config['n_batch_per_loop'],
         multiplier=gpus * train_config['n_batch_per_loop'])
