@@ -49,18 +49,25 @@ class Train:
         
         self.model = None
         if pretrain:
-            self.model = load_model_from_checkpoint(
-                model_type=config['model']['type'],
-                ckpt_path=pretrain)
+            try:
+                self.model = load_model_from_checkpoint(
+                    model_type=config['model']['type'],
+                    ckpt_path=pretrain)
+                logging.info('Loaded pretrained model state.')
+            except EOFError:
+                logging.warning('Bad checkpoint; ignoring pretrained state.')
         
         # if continuing from checkpoint
         if checkpoint is not None and os.path.exists(checkpoint):
-            # TODO figure out what error this raises when checkpoint is bad
-            resume_model = load_model_from_checkpoint(
-                model_type=config['model']['type'],
-                ckpt_path=checkpoint)
-
-            self.model = resume_model
+            try:
+                resume_model = load_model_from_checkpoint(
+                    model_type=config['model']['type'],
+                    ckpt_path=checkpoint)
+                self.model = resume_model
+                logging.info('Successfully loaded checkpoint.')
+            except EOFError:
+                logging.warning('Bad checkpoint; aborting checkpointed state. Expected behavior when Terra first initializes training.')
+                pass
         
         if self.model:
             train_config = self.model.hparams.train_config
@@ -84,6 +91,7 @@ class Train:
             gpus=gpus)
         
         if self.model is None:
+            logging.info('Initializing new model.')
             model_config = config['model']
             model_config['n_global_features'] = self.movie_dm.n_global_features
             self.model = init_model(
