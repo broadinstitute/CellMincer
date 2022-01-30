@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BRANCH=bw-oopify
+BRANCH=ld-refactoring
 BUCKET_PATH=gs://fc-secure-94c57cb0-5039-4596-9a9e-03c1cde4cc15/cellmincer_tarballs
 PWD=$(pwd)
 TMP_PATH=${PWD}/__tmp__
@@ -17,8 +17,8 @@ mv cellmincer REQUIREMENTS.txt setup.py MANIFEST.in README.md LICENSE ../CellMin
 cd ..
 rm -rf ./CellMincer
 mv ./CellMincer_tmp ./CellMincer
-tar --exclude-vcs -cvzf ./CellMincer.tar.gz ./CellMincer
-gsutil cp ./CellMincer.tar.gz ${BUCKET_PATH}
+tar --exclude-vcs -cvzf ./CellMincer-lightning.tar.gz ./CellMincer
+gsutil cp ./CellMincer-lightning.tar.gz ${BUCKET_PATH}
 cd ${PWD}
 rm -rf ${TMP_PATH}
 
