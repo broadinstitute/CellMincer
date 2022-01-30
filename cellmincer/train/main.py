@@ -22,10 +22,9 @@ from pytorch_lightning.loggers import NeptuneLogger
 from cellmincer.datasets import build_datamodule
 
 from cellmincer.models import \
-    DenoisingModel, \
     init_model, \
-    load_model_from_checkpoint, \
-    get_window_padding_from_config
+    get_window_padding_from_config, \
+    load_model_from_checkpoint
 
 from cellmincer.util import \
     const, \
@@ -51,20 +50,20 @@ class Train:
         self.model = None
         if pretrain:
             self.model = load_model_from_checkpoint(
-                model_config=config['model'],
+                model_type=config['model']['type'],
                 ckpt_path=pretrain)
         
         # if continuing from checkpoint
         if checkpoint is not None and os.path.exists(checkpoint):
             # TODO figure out what error this raises when checkpoint is bad
             resume_model = load_model_from_checkpoint(
-                model_config=config['model'],
+                model_type=config['model']['type'],
                 ckpt_path=checkpoint)
 
             self.model = resume_model
         
         if self.model:
-            train_config = self.model.train_config
+            train_config = self.model.hparams.train_config
         else:
             train_config = config['train']
             
@@ -176,13 +175,13 @@ class Train:
                 self.neptune_run[f'metrics/{i_dataset}/ssim/q3'].log(np.quantile(mssim_t, 0.75))
                 self.neptune_run[f'metrics/{i_dataset}/ssim/map'].log(neptune.types.File.as_image(S_accumulate / len(mssim_t)))
                 
-    def save_final(self):
-        torch.save(
-            self.model.state_dict(),
-            os.path.join(self.output_dir, 'model.pt'))
+#     def save_final(self):
+#         torch.save(
+#             self.model.state_dict(),
+#             os.path.join(self.output_dir, 'model.pt'))
         
-        if self.neptune_enabled:
-            self.neptune_run['final'].upload(os.path.join(self.output_dir, 'model.pt'))
+#         if self.neptune_enabled:
+#             self.neptune_run['final'].upload(os.path.join(self.output_dir, 'model.pt'))
 
     def run(self):
         logging.info('Training model...')
@@ -355,4 +354,4 @@ class Train:
 
         # save trained model
         logging.info('Training complete; saving model...')
-        self.save_final()
+#         self.save_final()

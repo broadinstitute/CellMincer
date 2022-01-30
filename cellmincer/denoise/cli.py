@@ -30,8 +30,7 @@ class CLI(AbstractCLI):
                 args.output_dir = os.path.expanduser(args.output_dir)
             else:
                 args.output_dir = args.input_dir
-            args.model = os.path.expanduser(args.model)
-            args.config = os.path.expanduser(args.config)
+            args.model_ckpt = os.path.expanduser(args.model_ckpt)
         except TypeError:
             raise ValueError('Problem with provided input paths.')
 
@@ -41,23 +40,9 @@ class CLI(AbstractCLI):
 
     def run(self, args):
         '''Run the main tool functionality on parsed arguments.'''
-
-        try:
-            with open(args.config, 'r') as f:
-                config = yaml.load(f, Loader=yaml.FullLoader)
-        except IOError:
-            raise RuntimeError(f'Error loading the input YAML file {args.input_yaml_file}!')
         
         # Send logging messages to stdout as well as a log file.
-        if 'log_dir' in config:
-            log_file = os.path.join(config['log_dir'], 'cellmincer_denoise.log')
-            logging.basicConfig(
-                level=logging.INFO,
-                format='cellmincer:denoise:%(asctime)s: %(message)s',
-                filename=log_file,
-                filemode='w')
-        else:
-            logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(level=logging.INFO)
         
         console = logging.StreamHandler()
         formatter = logging.Formatter('cellmincer:denoise:%(asctime)s: %(message)s', '%H:%M:%S')
@@ -71,5 +56,8 @@ class CLI(AbstractCLI):
         Denoise(
             input_dir=args.input_dir,
             output_dir=args.output_dir,
-            model_state=args.model,
-            config=config).run()
+            model_ckpt=args.model_ckpt,
+            model_type=args.model_type,
+            avi_enabled=args.avi_enabled,
+            avi_frames=args.avi_frames,
+            avi_sigma=args.avi_sigma).run()

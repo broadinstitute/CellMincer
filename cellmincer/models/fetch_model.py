@@ -30,10 +30,10 @@ def init_model(
     return denoising_model
 
 def load_model_from_checkpoint(
-        model_config: dict,
+        model_type: str,
         ckpt_path: str) -> DenoisingModel:
-    if model_config['type'] in _MODEL_DICT:
-        denoising_model = _MODEL_DICT[model_config['type']]['wrapper'].load_from_checkpoint(ckpt_path)
+    if model_type in _MODEL_DICT:
+        denoising_model = _MODEL_DICT[model_type]['wrapper'].load_from_checkpoint(ckpt_path)
     else:
         logging.warning(f'Unrecognized model type; options are {", ".join([name for name in _MODEL_DICT])}')
         exit(0)

@@ -139,6 +139,36 @@ class MovieDataModule(LightningDataModule):
     def n_global_features(self):
         return self.ws_denoising_list[0].n_global_features
 
+def build_ws_denoising(
+        dataset: str,
+        model_config: dict,
+        device: Optional[str] = None):
+    movie_diff = np.load(os.path.join(dataset, 'trend_subtracted.npy'))
+    movie_bg_path = os.path.join(dataset, 'trend.npy')
+
+    opto_noise_params_path = os.path.join(dataset, 'noise_params.json')
+    with open(opto_noise_params_path, 'r') as f:
+        noise_params = json.load(f)
+
+    opto_feature_path = os.path.join(dataset, 'features.pkl')
+    with open(opto_feature_path, 'rb') as f:
+        feature_container = pickle.Unpickler(f).load()
+
+    padding = max(get_window_padding_from_config(
+        model_config=model_config,
+        output_min_size=np.arange(1, max(movie_diff.shape[-2:]) + 1)))
+    
+    return OptopatchDenoisingWorkspace(
+        movie_diff=movie_diff,
+        movie_bg_path=movie_bg_path,
+        noise_params=noise_params,
+        features=feature_container,
+        x_padding=padding,
+        y_padding=padding,
+        padding_mode=model_config['padding_mode'],
+        occlude_padding=model_config['occlude_padding'],
+        device=device)
+
 def build_datamodule(
         datasets: List[str],
         model_config: dict,
@@ -150,34 +180,7 @@ def build_datamodule(
     ws_denoising_list = []
     for i_dataset, dataset in enumerate(datasets):
         logging.info(f'({i_dataset + 1}/{len(datasets)}) {dataset}')
-        
-        movie_diff = np.load(os.path.join(dataset, 'trend_subtracted.npy'))
-        movie_bg_path = os.path.join(dataset, 'trend.npy')
-
-        opto_noise_params_path = os.path.join(dataset, 'noise_params.json')
-        with open(opto_noise_params_path, 'r') as f:
-            noise_params = json.load(f)
-
-        opto_feature_path = os.path.join(dataset, 'features.pkl')
-        with open(opto_feature_path, 'rb') as f:
-            feature_container = pickle.Unpickler(f).load()
-
-        padding = max(get_window_padding_from_config(
-            model_config=model_config,
-            output_min_size=np.arange(1, max(movie_diff.shape[-2:]) + 1)))
-
-        ws_denoising_list.append(
-            OptopatchDenoisingWorkspace(
-                movie_diff=movie_diff,
-                movie_bg_path=movie_bg_path,
-                noise_params=noise_params,
-                features=feature_container,
-                x_padding=padding,
-                y_padding=padding,
-                padding_mode=model_config['padding_mode'],
-                occlude_padding=model_config['occlude_padding']
-            )
-        )
+        ws_denoising_list.append(build_ws_denoising(dataset, model_config))
 
     return MovieDataModule(
         ws_denoising_list,

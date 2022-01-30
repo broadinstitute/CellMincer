@@ -205,7 +205,8 @@ class OptopatchGlobalFeaturesTorchCache:
             features: OptopatchGlobalFeatureContainer,
             x_padding: int,
             y_padding: int,
-            padding_mode: Optional[str] = 'reflect'):
+            padding_mode: Optional[str] = 'reflect',
+            device: Optional[torch.device] = None):
         self.x_padding = x_padding
         self.y_padding = y_padding
         
@@ -217,6 +218,8 @@ class OptopatchGlobalFeaturesTorchCache:
                     mode=padding_mode)[None, None, ...]
                 for feature_array_xy in features.feature_array_list],
                 axis=-3))
+        if device is not None:
+            self.features_1fxy = self.features_1fxy.to(device)
         
         self.norm_scale = features.norm_scale
         self.feature_name_list = features.feature_name_list
@@ -232,15 +235,17 @@ class OptopatchGlobalFeaturesTorchCache:
 class OptopatchDenoisingWorkspace:
     """A workspace containing arrays prepared for denoising (e.g. normalized, padded)"""
     def __init__(self,
-                 movie_diff: np.ndarray,
-                 movie_bg_path: str,
-                 noise_params: dict,
-                 features: OptopatchGlobalFeatureContainer,
-                 x_padding: int,
-                 y_padding: int,
-                 padding_mode: Optional[str] = 'reflect',
-                 occlude_padding: Optional[bool] = False):
+            movie_diff: np.ndarray,
+            movie_bg_path: str,
+            noise_params: dict,
+            features: OptopatchGlobalFeatureContainer,
+            x_padding: int,
+            y_padding: int,
+            padding_mode: Optional[str] = 'reflect',
+            occlude_padding: Optional[bool] = False,
+            device: Optional[torch.device] = None):
         self.noise_params = noise_params
+        self.device = device
         
         self.n_frames, self.width, self.height = movie_diff.shape[-3:]
         self._movie_bg_path = movie_bg_path
@@ -260,7 +265,8 @@ class OptopatchDenoisingWorkspace:
             features=features,
             x_padding=x_padding,
             y_padding=y_padding,
-            padding_mode=padding_mode)
+            padding_mode=padding_mode,
+            device=device)
         
         trend_mean_feature_index = self.cached_features.get_feature_index('trend_mean_0')
         detrended_std_feature_index = self.cached_features.get_feature_index('detrended_std_0')
@@ -328,12 +334,19 @@ class OptopatchDenoisingWorkspace:
                 ...,
                 x0:(x0 + x_window + 2 * x_padding),
                 y0:(y0 + y_window + 2 * y_padding)])
+        if self.device is not None:
+            diff_movie_slice_1txy = diff_movie_slice_1txy.to(self.device)
         
-        bg_movie_slice_1txy = torch.tensor(
-            self.padded_scaled_bg_movie_1txy[:, t_begin_index:t_end_index, ...][
-                ...,
-                x0:(x0 + x_window + 2 * x_padding),
-                y0:(y0 + y_window + 2 * y_padding)]) if include_bg else None
+        if include_bg:
+            bg_movie_slice_1txy = torch.tensor(
+                self.padded_scaled_bg_movie_1txy[:, t_begin_index:t_end_index, ...][
+                    ...,
+                    x0:(x0 + x_window + 2 * x_padding),
+                    y0:(y0 + y_window + 2 * y_padding)])
+            if self.device is not None:
+                bg_movie_slice_1txy = bg_movie_slice_1txy.to(device)
+        else:
+            bg_movie_slice_1txy = None
 
         return {
             'bg': bg_movie_slice_1txy,

@@ -261,7 +261,8 @@ class PlSpatialUnet2dTemporalDenoiser(LightningModule):
             train_config: dict):
         super(PlSpatialUnet2dTemporalDenoiser, self).__init__()
         
-        self.train_config = train_config
+        self.save_hyperparameters('model_config', 'train_config')
+        
         self.neptune_run_id = None
         self.denoising_model = nn.SyncBatchNorm.convert_sync_batchnorm(SpatialUnet2dTemporalDenoiser(model_config))
 
@@ -270,8 +271,8 @@ class PlSpatialUnet2dTemporalDenoiser(LightningModule):
                 features: Optional[torch.Tensor] = None):
         return crop_center(
             self.denoising_model(x=x, features=features),
-            target_width=self.train_config['x_window'],
-            target_height=self.train_config['y_window'])
+            target_width=self.hparams.train_config['x_window'],
+            target_height=self.hparams.train_config['y_window'])
 
     def training_step(self, batch, batch_idx) -> torch.Tensor:
         # batch is what the dataloader provides -> movie slice
@@ -294,12 +295,12 @@ class PlSpatialUnet2dTemporalDenoiser(LightningModule):
     def configure_optimizers(self) -> torch.optim.Optimizer:
         optim = generate_optimizer(
             denoising_model=self.denoising_model,
-            optim_params=self.train_config['optim_params'],
-            lr=self.train_config['lr_params']['max'])
+            optim_params=self.hparams.train_config['optim_params'],
+            lr=self.hparams.train_config['lr_params']['max'])
         sched = generate_lr_scheduler(
             optim=optim,
-            lr_params=self.train_config['lr_params'],
-            n_iters=self.train_config['n_iters'])
+            lr_params=self.hparams.train_config['lr_params'],
+            n_iters=self.hparams.train_config['n_iters'])
 
         return [optim], [sched]
 
@@ -313,9 +314,9 @@ class PlSpatialUnet2dTemporalDenoiser(LightningModule):
         def _compute_lp_loss(_err, _norm_p, _scale=1.):
             return (_scale * (_err.abs() + const.EPS).pow(_norm_p)).sum()
 
-        x_window, y_window = self.train_config['x_window'], self.train_config['y_window']
+        x_window, y_window = self.hparams.train_config['x_window'], self.hparams.train_config['y_window']
         total_pixels = x_window * y_window
-        t_tandem = denoised_output_ntxy.shape[1] - self.denoising_model.t_order + 1
+        t_tandem = denoised_output_ntxy.shape[1]
 
         # reconstruction losses
         total_masked_pixels_t = occlusion_masks.sum(dim=(0, 2, 3))
@@ -323,7 +324,7 @@ class PlSpatialUnet2dTemporalDenoiser(LightningModule):
         loss_scale_ntxy = loss_scale_t[None, :, None, None]
 
         err_ntxy = occlusion_masks * (denoised_output_ntxy - expected_output_ntxy)
-        rec_loss = _compute_lp_loss(_err=err_ntxy, _norm_p=self.train_config['norm_p'], _scale=loss_scale_ntxy)
+        rec_loss = _compute_lp_loss(_err=err_ntxy, _norm_p=self.hparams.train_config['norm_p'], _scale=loss_scale_ntxy)
 
         return {'rec_loss': rec_loss}
 
@@ -343,9 +344,9 @@ class PlSpatialUnet2dTemporalDenoiser(LightningModule):
         trend_mean_feature_index = batch['trend_mean_feature_index']
         detrended_std_feature_index = batch['detrended_std_feature_index']
 
-        x_window, y_window = self.train_config['x_window'], self.train_config['y_window']
-        x_padding, y_padding = self.train_config['x_padding'], self.train_config['y_padding']
-        occlusion_prob = self.train_config['occlusion_prob']
+        x_window, y_window = self.hparams.train_config['x_window'], self.hparams.train_config['y_window']
+        x_padding, y_padding = self.hparams.train_config['x_padding'], self.hparams.train_config['y_padding']
+        occlusion_prob = self.hparams.train_config['occlusion_prob']
         padded_x_window = x_window + 2 * x_padding
         padded_y_window = y_window + 2 * y_padding
         
@@ -383,10 +384,8 @@ class PlSpatialUnet2dTemporalDenoiser(LightningModule):
             'occlusion_masks': occlusion_masks_ntxy}
     
     def on_save_checkpoint(self, checkpoint):
-        checkpoint['train_config'] = self.train_config
         if isinstance(self.logger, NeptuneLogger):
             checkpoint['neptune_run_id'] = self.logger.run._short_id
 
     def on_load_checkpoint(self, checkpoint):
-        self.train_config = checkpoint['train_config']
         self.neptune_run_id = checkpoint.get('neptune_run_id', None)
