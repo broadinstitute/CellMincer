@@ -2,7 +2,7 @@ matplotlib
 numpy
 scipy
 tifffile
-torch
+torch>=1.9
 torchinfo
 boltons
 pytorch-lightning
