@@ -121,7 +121,7 @@ class Train:
             max_steps=train_config['n_iters'],
             default_root_dir=self.output_dir,
             # TODO experiment with these settings because docs are ambiguous
-            callbacks=[ModelCheckpoint(dirpath=self.output_dir, save_last=True, train_time_interval=timedelta(seconds=3600))],
+            callbacks=[ModelCheckpoint(dirpath=self.output_dir, save_last=True)],
             logger=pl_logger)
         
         self.insight = config['insight']
