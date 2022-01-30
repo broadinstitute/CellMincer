@@ -189,5 +189,5 @@ def build_datamodule(
         x_padding=train_config['x_padding'],
         y_padding=train_config['y_padding'],
         t_total=get_temporal_order_from_config(model_config) + train_config['t_tandem'] - 1,
-        n_batch=train_config['n_batch_per_loop'],
-        length=gpus * train_config['n_batch_per_loop'])
+        n_batch=train_config['n_batch'],
+        length=gpus * train_config['n_batch'])
