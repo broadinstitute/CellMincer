@@ -45,17 +45,17 @@ class MovieDataset(Dataset):
             x_padding: int,
             y_padding: int,
             t_total: int,
-            multiplier: int):
+            length: int):
         self.ws_denoising_list = ws_denoising_list
         self.x_window = x_window
         self.y_window = y_window
         self.x_padding = x_padding
         self.y_padding = y_padding
         self.t_total = t_total
-        self.multiplier = multiplier
+        self.length = length
 
     def __len__(self):
-        return len(self.ws_denoising_list) * self.multiplier
+        return self.length
         
     def __getitem__(self, item):
         movie_idx = item % len(self.ws_denoising_list)
@@ -102,7 +102,7 @@ class MovieDataModule(LightningDataModule):
             y_padding: int,
             t_total: int,
             n_batch: int,
-            multiplier: Optional[int] = None):
+            length: int):
         self.ws_denoising_list = ws_denoising_list
         self.x_window = x_window
         self.y_window = y_window
@@ -110,7 +110,7 @@ class MovieDataModule(LightningDataModule):
         self.y_padding = y_padding
         self.t_total = t_total
         self.n_batch = n_batch
-        self.multiplier = multiplier if multiplier else n_batch
+        self.length = length
     
     def setup(self, stage: Optional[str] = None):
         self.dataset = MovieDataset(
@@ -120,7 +120,7 @@ class MovieDataModule(LightningDataModule):
             x_padding=self.x_padding,
             y_padding=self.y_padding,
             t_total=self.t_total,
-            multiplier=self.multiplier)
+            length=self.length)
     
     def train_dataloader(self) -> "torch.dataloader":
         return DataLoader(
@@ -190,4 +190,4 @@ def build_datamodule(
         y_padding=train_config['y_padding'],
         t_total=get_temporal_order_from_config(model_config) + train_config['t_tandem'] - 1,
         n_batch=train_config['n_batch_per_loop'],
-        multiplier=gpus * train_config['n_batch_per_loop'])
+        length=gpus * train_config['n_batch_per_loop'])
