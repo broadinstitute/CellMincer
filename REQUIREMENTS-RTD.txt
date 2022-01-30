@@ -5,6 +5,7 @@ tifffile
 torch
 torchinfo
 boltons
+pytorch-lightning
 pyyaml
 scikit-image
 scikit-learn
