@@ -137,8 +137,8 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
             for i_t in range(mid_frame_begin - t_mid, mid_frame_begin + t_mid):
                 padded_sliced_movie_1txy = ws_denoising.get_movie_slice(
                     include_bg=False,
-                    t_begin_index=i_t,
-                    t_end_index=i_t + 1,
+                    t_begin=i_t,
+                    t_length=1,
                     x0=x0,
                     y0=y0,
                     x_window=x_window,
@@ -155,8 +155,8 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
             for i_t in range(mid_frame_begin, mid_frame_end):
                 padded_sliced_movie_1txy = ws_denoising.get_movie_slice(
                     include_bg=False,
-                    t_begin_index=i_t + t_mid,
-                    t_end_index=i_t + t_mid + 1,
+                    t_begin=i_t + t_mid,
+                    t_length=1,
                     x0=x0,
                     y0=y0,
                     x_window=x_window,
@@ -198,8 +198,8 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
         
         input_data['x'] = ws_denoising.get_movie_slice(
             include_bg=False,
-            t_begin_index=0,
-            t_end_index=self.t_order,
+            t_begin=0,
+            t_length=self.t_order,
             x0=0,
             y0=0,
             x_window=x_window,

@@ -5,9 +5,47 @@ import torch
 from typing import Optional, Union, List, Tuple
 from bisect import bisect_left, bisect_right
 
+import torch
+from torch.optim.lr_scheduler import LambdaLR
+from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
+
 from . import const
 
 import logging
+
+
+def generate_optimizer(denoising_model, optim_params: dict, lr: float):
+    if optim_params['type'] == 'adam':
+        optim = torch.optim.AdamW(
+            denoising_model.parameters(),
+            lr=lr,
+            betas=optim_params['betas'],
+            weight_decay=optim_params['weight_decay'])
+    elif optim_params['type'] == 'sgd':
+        optim = torch.optim.SGD(denoising_model.parameters(), lr=lr, momentum=optim_params['momentum'])
+    else:
+        logging.error('Unrecognized optimizer type')
+        raise ValueError('Unrecognized optimizer type.')
+    return optim
+
+
+def generate_lr_scheduler(
+        optim: torch.optim.Optimizer,
+        lr_params: dict,
+        n_iters: int):
+    if lr_params['type'] == 'cosine-annealing-warmup':
+        sched = CosineAnnealingWarmupRestarts(
+            optim,
+            first_cycle_steps=n_iters,
+            cycle_mult=1.0,
+            max_lr=lr_params['max'],
+            min_lr=lr_params['min'],
+            warmup_steps=int(n_iters * lr_params['warmup']),
+            gamma=1.0)
+    else:
+        logging.error('Unrecognized scheduler type')
+        raise ValueError('Unrecognized scheduler type.')
+    return sched
 
 
 def get_cosine_similarity_with_sequence_np(
