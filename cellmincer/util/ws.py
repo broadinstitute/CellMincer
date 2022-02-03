@@ -219,7 +219,7 @@ class OptopatchGlobalFeaturesTorchCache:
                 for feature_array_xy in features.feature_array_list],
                 axis=-3))
         if device is not None:
-            self.features_1fxy = self.features_1fxy.to(self.device)
+            self.features_1fxy = self.features_1fxy.to(device)
         
         self.norm_scale = features.norm_scale
         self.feature_name_list = features.feature_name_list
