@@ -308,21 +308,17 @@ class OptopatchDenoisingWorkspace:
     def get_movie_slice(
             self,
             include_bg: bool,
-            t_begin_index: int,
-            t_end_index: int,
+            t_begin: int,
+            t_length: int,
             x0: int,
             y0: int,
             x_window: int,
             y_window: int,
             x_padding: Optional[int] = None,
             y_padding: Optional[int] = None) -> Dict[str, torch.Tensor]:
-        assert self.width - x_window >= 0
-        assert self.height - y_window >= 0
         assert 0 <= x0 <= self.width - x_window
         assert 0 <= y0 <= self.height - y_window
-        assert 0 <= t_begin_index <= self.n_frames
-        assert 0 <= t_end_index <= self.n_frames
-        assert t_end_index > t_begin_index
+        assert 0 <= t_begin <= self.n_frames - t_length
         
         if x_padding is None:
             x_padding = self.x_padding
@@ -330,8 +326,8 @@ class OptopatchDenoisingWorkspace:
             y_padding = self.y_padding
         
         diff_movie_slice_1txy = torch.tensor(
-            self.padded_scaled_diff_movie_1txy[:, t_begin_index:t_end_index, ...][
-                ...,
+            self.padded_scaled_diff_movie_1txy[...,
+                t_begin:t_begin + t_length,
                 x0:(x0 + x_window + 2 * x_padding),
                 y0:(y0 + y_window + 2 * y_padding)])
         if self.device is not None:
@@ -339,8 +335,8 @@ class OptopatchDenoisingWorkspace:
         
         if include_bg:
             bg_movie_slice_1txy = torch.tensor(
-                self.padded_scaled_bg_movie_1txy[:, t_begin_index:t_end_index, ...][
-                    ...,
+                self.padded_scaled_bg_movie_1txy[...,
+                    t_begin:t_begin + t_length,
                     x0:(x0 + x_window + 2 * x_padding),
                     y0:(y0 + y_window + 2 * y_padding)])
             if self.device is not None:
@@ -361,8 +357,6 @@ class OptopatchDenoisingWorkspace:
             y_window: int,
             x_padding: Optional[int] = None,
             y_padding: Optional[int] = None) -> torch.Tensor:
-        assert self.width - x_window >= 0
-        assert self.height - y_window >= 0
         assert 0 <= x0 <= self.width - x_window
         assert 0 <= y0 <= self.height - y_window
         
@@ -372,9 +366,11 @@ class OptopatchDenoisingWorkspace:
             y_padding = self.y_padding
         
         feature_slice_1fxy = self.cached_features.features_1fxy[
-            :, :,
+            ...,
             x0:(x0 + x_window + 2 * x_padding),
             y0:(y0 + y_window + 2 * y_padding)]
+        if self.device is not None:
+            feature_slice_1fxy = feature_slice_1fxy.to(device)
         
         return feature_slice_1fxy
     

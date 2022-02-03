@@ -2,7 +2,7 @@ matplotlib
 numpy
 scipy
 tifffile
-torch>=1.9
+torch>=1.10
 torchinfo
 boltons
 pytorch-lightning
@@ -10,5 +10,6 @@ pyyaml
 scikit-image
 scikit-learn
 scikit-video
+typing_extensions>=3.7.4, <4.0.0.0
 neptune-client==0.9.16
 cosine_annealing_warmup @ https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup/tarball/master#egg=cosine_annealing_warmup

@@ -121,7 +121,8 @@ class Train:
                 api_key=config['neptune']['api_token'],
                 project=config['neptune']['project'],
                 run=neptune_run,
-                tags=config['neptune']['tags'])
+                tags=config['neptune']['tags'],
+                log_model_checkpoints=False)
 
         self.trainer = Trainer(
             strategy='ddp',

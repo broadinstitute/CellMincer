@@ -336,8 +336,8 @@ class PlSpatialUnet2dTemporalDenoiser(LightningModule):
                 width: int,
                 height: int) -> torch.Tensor:
             return torch.distributions.Bernoulli(
-                probs=torch.tensor(p)).sample(
-                [n_batch, t_tandem, width, height]).to(self.device)
+                probs=torch.tensor(p, device=self.device)).sample(
+                [n_batch, t_tandem, width, height]).byte()
         
         padded_diff_movie_ntxy = batch['padded_diff']
         features_nfxy = batch['features']
@@ -364,19 +364,17 @@ class PlSpatialUnet2dTemporalDenoiser(LightningModule):
             t_tandem=t_tandem,
             width=x_window,
             height=y_window)
-        occlusion_masks_ntxy.type_as(padded_diff_movie_ntxy)
         
-        padded_occlusion_masks_ntxy = torch.zeros(n_batch, t_tandem, padded_x_window, padded_y_window, device=self.device)
-        padded_occlusion_masks_ntxy[..., x_padding:-x_padding, y_padding:-y_padding] = occlusion_masks_ntxy
-        padded_occlusion_masks_ntxy.type_as(padded_diff_movie_ntxy)
+        padded_occlusion_masks_ntxy = nn.functional.pad(occlusion_masks_ntxy, (y_padding, y_padding, x_padding, x_padding), 'constant', 0)
 
-        padded_diff_movie_ntxy[:, tandem_start:tandem_end, :, :] = (
-            (1 - padded_occlusion_masks_ntxy) * padded_diff_movie_ntxy[:, tandem_start:tandem_end, :, :]
-            + padded_occlusion_masks_ntxy * torch.distributions.Normal(
+        padded_diff_movie_ntxy[:, tandem_start:tandem_end, :, :] = torch.where(
+            padded_occlusion_masks_ntxy,
+            torch.distributions.Normal(
                 loc=features_nfxy[:, trend_mean_feature_index, :, :][:, None, ...].expand(
                     n_batch, t_tandem, padded_x_window, padded_y_window),
                 scale=features_nfxy[:, detrended_std_feature_index, :, :][:, None, ...].expand(
-                    n_batch, t_tandem, padded_x_window, padded_y_window) + const.EPS).sample())
+                    n_batch, t_tandem, padded_x_window, padded_y_window) + const.EPS).sample(),
+            padded_diff_movie_ntxy[:, tandem_start:tandem_end, :, :])
 
         return {
             'padded_diff': padded_diff_movie_ntxy,

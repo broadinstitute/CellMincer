@@ -68,8 +68,8 @@ class MovieDataset(Dataset):
         y0 = np.random.randint(height - self.y_window + 1)
         diff_movie_slice_1txy = self.ws_denoising_list[movie_idx].get_movie_slice(
             include_bg=False,
-            t_begin_index=t0,
-            t_end_index=t0 + self.t_total,
+            t_begin=t0,
+            t_length=self.t_total,
             x0=x0,
             y0=y0,
             x_window=self.x_window,
@@ -142,7 +142,7 @@ class MovieDataModule(LightningDataModule):
 def build_ws_denoising(
         dataset: str,
         model_config: dict,
-        device: Optional[str] = None):
+        device: Optional[torch.device] = None):
     movie_diff = np.load(os.path.join(dataset, 'trend_subtracted.npy'))
     movie_bg_path = os.path.join(dataset, 'trend.npy')
 
