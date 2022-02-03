@@ -47,7 +47,7 @@ class Denoise:
         self.ws_denoising = build_ws_denoising(
             dataset=input_dir,
             model_config=self.model.hparams.model_config,
-            device='cuda')
+            device=torch.device('cuda'))
 
         self.avi_enabled = avi_enabled
         self.avi_frames = avi_frames if avi_frames is not None else [0, self.ws_denoising.n_frames]

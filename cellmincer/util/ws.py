@@ -219,7 +219,7 @@ class OptopatchGlobalFeaturesTorchCache:
                 for feature_array_xy in features.feature_array_list],
                 axis=-3))
         if device is not None:
-            self.features_1fxy = self.features_1fxy.to(device)
+            self.features_1fxy = self.features_1fxy.to(self.device)
         
         self.norm_scale = features.norm_scale
         self.feature_name_list = features.feature_name_list
@@ -340,7 +340,7 @@ class OptopatchDenoisingWorkspace:
                     x0:(x0 + x_window + 2 * x_padding),
                     y0:(y0 + y_window + 2 * y_padding)])
             if self.device is not None:
-                bg_movie_slice_1txy = bg_movie_slice_1txy.to(device)
+                bg_movie_slice_1txy = bg_movie_slice_1txy.to(self.device)
         else:
             bg_movie_slice_1txy = None
 
@@ -370,7 +370,7 @@ class OptopatchDenoisingWorkspace:
             x0:(x0 + x_window + 2 * x_padding),
             y0:(y0 + y_window + 2 * y_padding)]
         if self.device is not None:
-            feature_slice_1fxy = feature_slice_1fxy.to(device)
+            feature_slice_1fxy = feature_slice_1fxy.to(self.device)
         
         return feature_slice_1fxy
     
