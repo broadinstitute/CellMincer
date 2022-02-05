@@ -101,7 +101,6 @@ class Train:
         pl_logger = True
         
         if self.neptune_enabled:
-            neptune_run = None
             if self.model.neptune_run_id is not None:
                 logging.info('Reinitializing existing Neptune run...')
                 neptune_run = neptune.init(
@@ -109,15 +108,15 @@ class Train:
                     project=config['neptune']['project'],
                     run=self.model.neptune_run_id,
                     tags=config['neptune']['tags'])
+                pl_logger = NeptuneLogger(run=neptune_run)
             else:
                 logging.info('Initializing new Neptune run...')
-
-            pl_logger = NeptuneLogger(
-                api_key=config['neptune']['api_token'],
-                project=config['neptune']['project'],
-                run=neptune_run,
-                tags=config['neptune']['tags'],
-                log_model_checkpoints=False)
+                pl_logger = NeptuneLogger(
+                    api_key=config['neptune']['api_token'],
+                    project=config['neptune']['project'],
+                    tags=config['neptune']['tags'],
+                    log_model_checkpoints=False)
+                pl_logger.experiment['datasets'] = inputs
 
         self.trainer = Trainer(
             strategy='ddp',
