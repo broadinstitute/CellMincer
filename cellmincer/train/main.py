@@ -53,12 +53,14 @@ class Train:
                 logging.warning('Bad checkpoint; ignoring pretrained state.')
         
         # if continuing from checkpoint
+        self.ckpt_path = None
         if checkpoint is not None and os.path.exists(checkpoint):
             try:
                 resume_model = load_model_from_checkpoint(
                     model_type=config['model']['type'],
                     ckpt_path=checkpoint)
                 self.model = resume_model
+                self.ckpt_path = checkpoint
                 logging.info('Successfully loaded checkpoint.')
             except EOFError:
                 logging.warning('Bad checkpoint; aborting checkpointed state. Expected behavior when Terra first initializes training.')
@@ -121,7 +123,7 @@ class Train:
         self.trainer = Trainer(
             strategy='ddp',
             gpus=gpus,
-            max_steps=train_config['n_iters'],
+            max_epochs=train_config['n_iters'],
             default_root_dir=self.output_dir,
             # TODO experiment with these settings because docs are ambiguous
             callbacks=[ModelCheckpoint(dirpath=self.output_dir, save_last=True)],
@@ -181,7 +183,10 @@ class Train:
     def run(self):
         logging.info('Training model...')
         
-        self.trainer.fit(self.model, self.movie_dm, None)
+        self.trainer.fit(
+            model=self.model,
+            train_dataloaders=self.movie_dm,
+            ckpt_path=self.ckpt_path)
 
         # save trained model
         logging.info('Training complete; saving model...')
