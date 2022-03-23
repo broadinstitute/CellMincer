@@ -1,10 +1,12 @@
 matplotlib
 numpy
 scipy
+tangled-up-in-unicode==0.1.0
 tifffile
 torch>=1.10
 torchinfo
 boltons
+pydantic==1.8.2
 pytorch-lightning
 pyyaml
 scikit-image

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pytorch_lightning import LightningModule
 from pytorch_lightning.loggers import NeptuneLogger
+from pytorch_lightning.loggers.base import DummyExperiment
 
 from torchinfo import summary
 
@@ -286,7 +287,8 @@ class PlSpatialUnet2dTemporalDenoiser(LightningModule):
 
         loss = loss_dict["rec_loss"]
         self.log('train/loss', loss.item())
-        self.logger.experiment['train/loss'].log(loss.item())
+        if isinstance(self.logger.experiment, DummyExperiment):
+            self.logger.experiment['train/loss'].log(loss.item())
         return loss
 
     def validation_step(self, batch, batch_idx, dataloader_idx: int = -1) -> Any:
