@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 from scipy.signal import find_peaks
 
+
 from .utils import crop_center
 
 from . import const
