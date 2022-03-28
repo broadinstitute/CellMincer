@@ -29,14 +29,10 @@ class Denoise:
             model_type: str,
             avi_enabled: bool,
             avi_frames: Optional[List[int]],
-            avi_sigma: Optional[List[int]],
-            peak: Optional[int] = 65535):
+            avi_sigma: Optional[List[int]]):
         self.output_dir = output_dir
         if not os.path.exists(self.output_dir):
             os.mkdir(self.output_dir)
-        
-        clean_path = os.path.join(input_dir, 'clean.npy')
-        self.clean = np.load(clean_path) if os.path.exists(clean_path) else None
         
         self.model = load_model_from_checkpoint(
             model_type=model_type,
@@ -52,7 +48,6 @@ class Denoise:
         self.avi_enabled = avi_enabled
         self.avi_frames = avi_frames if avi_frames is not None else [0, self.ws_denoising.n_frames]
         self.avi_sigma = avi_sigma if avi_sigma is not None else [0, 10]
-        self.peak = peak
     
     def run(self):
         logging.info('Denoising movie...')
@@ -84,13 +79,6 @@ class Denoise:
 
         denoised_txy *= self.ws_denoising.cached_features.norm_scale
         denoised_txy += self.ws_denoising.bg_movie_txy
-        
-        if self.clean is not None:
-            mse_t = np.mean(np.square(self.clean - denoised_txy), axis=tuple(range(1, self.clean.ndim)))
-            psnr_t = 10 * np.log10(self.peak * self.peak / mse_t)
-            np.save(
-                os.path.join(self.output_dir, 'psnr_t.npy'),
-                psnr_t)
 
         tifffile.imwrite(
             os.path.join(self.output_dir, f'denoised_tyx.tif'),
