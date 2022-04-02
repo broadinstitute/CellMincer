@@ -1,0 +1,17 @@
+boltons==21.0.0
+matplotlib
+neptune-client==0.15.2
+numpy==1.21.5
+pydantic==1.8.2
+pytorch-lightning==1.5.10
+pyyaml
+scipy
+scikit-image==0.19.2
+scikit-learn
+scikit-video==1.1.11
+tangled-up-in-unicode==0.1.0
+tifffile==2021.11.2
+torch==1.10.0
+torchinfo==1.6.3
+typing_extensions>=3.7.4, <4.0.0.0
+cosine_annealing_warmup @ https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup/tarball/master#egg=cosine_annealing_warmup

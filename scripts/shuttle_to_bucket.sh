@@ -13,10 +13,11 @@ git fetch --all
 git checkout ${BRANCH}
 COMMIT_ID=$(git rev-parse --short HEAD)
 mkdir ../CellMincer_tmp
-mv cellmincer REQUIREMENTS.txt setup.py MANIFEST.in README.md LICENSE ../CellMincer_tmp/
+mv cellmincer REQUIREMENTS-FREEZE.txt setup.py MANIFEST.in README.md LICENSE ../CellMincer_tmp/
 cd ..
 rm -rf ./CellMincer
 mv ./CellMincer_tmp ./CellMincer
+mv ./CellMincer/REQUIREMENTS-FREEZE.txt ./CellMincer/REQUIREMENTS.txt
 tar --exclude-vcs -cvzf ./CellMincer-lightning.tar.gz ./CellMincer
 gsutil cp ./CellMincer-lightning.tar.gz ${BUCKET_PATH}
 cd ${PWD}
