@@ -27,6 +27,7 @@ class CLI(AbstractCLI):
         try:
             args.input_file = os.path.expanduser(args.input_file)
             args.output_dir = os.path.expanduser(args.output_dir)
+            args.active_range_file = os.path.expanduser(args.active_range_file)
         except TypeError:
             raise ValueError('Problem with provided input paths.')
 
@@ -50,4 +51,5 @@ class CLI(AbstractCLI):
         Feature(
             input_file=args.input_file,
             output_dir=args.output_dir,
-            use_active_range=args.active_range).run()
+            use_active_range=args.active_range,
+            active_range_file=args.active_range_file).run()

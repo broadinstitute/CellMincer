@@ -251,6 +251,7 @@ class OptopatchGlobalFeatureExtractor:
     def __init__(
             self,
             ws_base: 'OptopatchBaseWorkspace',
+            active_mask: Optional[np.ndarray],
             select_active_t_range: bool = True,
             max_depth: int = 3,
             detrending_order: int = 10,
@@ -268,8 +269,7 @@ class OptopatchGlobalFeatureExtractor:
         self.dtype = dtype
         
         # containers
-        self.active_mask_t = self.determine_active_t_range(
-            ws_base, select_active_t_range)
+        self.active_mask_t = active_mask if active_mask is not None else self.determine_active_t_range(ws_base, select_active_t_range)
         self.features = OptopatchGlobalFeatureContainer()
         
         # populate features

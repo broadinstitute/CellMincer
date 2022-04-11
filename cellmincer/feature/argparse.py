@@ -34,6 +34,15 @@ def add_subparser_args(subparsers: argparse) -> argparse:
         default=None,
         required=True,
         help='Output directory.')
+
+    subparser.add_argument(
+        '--active-range-file',
+        nargs=None,
+        type=str,
+        dest='active_range_file',
+        default=None,
+        required=False,
+        help='Active range mask.')
     
     subparser.add_argument(
         '--no-active-range',

@@ -47,6 +47,7 @@ class Preprocess:
         self.n_frames_per_segment = manifest['n_frames_per_segment']
         self.n_segments = manifest['n_segments']
         self.sampling_rate = manifest['sampling_rate']
+        self.stim = manifest.get('stim')
         
         self.dejitter_config = config['dejitter']
         self.ne_config = config['noise_estimation']
@@ -94,6 +95,19 @@ class Preprocess:
                 for i_segment in range(self.n_segments)])
             output_file = os.path.join(self.output_dir, 'clean.npy')
             np.save(output_file, trimmed_clean_txy)
+            
+        # writing active range mask if stim params provided
+        if self.stim:
+            mask = np.zeros(self.n_frames_per_segment * self.n_segments, dtype=np.bool)
+            for i_seg in range(self.stim['segment_start'], self.stim['segment_end']):
+                mask[i_seg * self.n_frames_per_segment + self.stim['frame_start']:
+                     i_seg * self.n_frames_per_segment + self.stim['frame_end']] = 1
+            mask = np.concatenate([
+                mask[i_seg * self.n_frames_per_segment + self.trim['trim_left']:
+                     (i_seg + 1) * self.n_frames_per_segment - self.trim['trim_right']]
+                for i_seg in range(self.n_segments)])
+            output_file = os.path.join(self.output_dir, 'active_mask.npy')
+            np.save(output_file, mask)
 
         logging.info('Preprocessing done.')
         
@@ -355,11 +369,11 @@ class Preprocess:
             self,
             movie_txy: np.ndarray,
             i_stim: int,
-            tranform_time: bool = True,) -> np.ndarray:
+            transform_time: bool = True) -> np.ndarray:
         i_t_begin = self.n_frames_per_segment * i_stim + self.trim['trim_left']
         i_t_end = self.n_frames_per_segment * (i_stim + 1) - self.trim['trim_right']
         i_t_list = [i_t for i_t in range(i_t_begin, i_t_end)]
-        if tranform_time:
+        if transform_time:
             t = np.asarray([i_t - i_t_begin for i_t in i_t_list]) / self.sampling_rate
         else:
             t = i_t_list
