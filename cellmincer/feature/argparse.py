@@ -17,32 +17,13 @@ def add_subparser_args(subparsers: argparse) -> argparse:
 
     subparser.add_argument(
         '-i',
-        '--input-file',
+        '--input-dir',
         nargs=None,
         type=str,
-        dest='input_file',
+        dest='input_dir',
         default=None,
         required=True,
-        help='Input movie object.')
-    
-    subparser.add_argument(
-        '-o',
-        '--output-dir',
-        nargs=None,
-        type=str,
-        dest='output_dir',
-        default=None,
-        required=True,
-        help='Output directory.')
-
-    subparser.add_argument(
-        '--active-range-file',
-        nargs=None,
-        type=str,
-        dest='active_range_file',
-        default=None,
-        required=False,
-        help='Active range mask.')
+        help='Input directory.')
     
     subparser.add_argument(
         '--no-active-range',

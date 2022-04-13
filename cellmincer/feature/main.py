@@ -15,15 +15,15 @@ from cellmincer.util import OptopatchBaseWorkspace, OptopatchGlobalFeatureExtrac
 class Feature:
     def __init__(
             self,
-            input_file: str,
-            output_dir: str,
-            use_active_range: bool,
-            active_range_file: Optional[str]):
+            input_dir: str,
+            use_active_range: bool):
         
+        self.input_dir = input_dir
+        input_file = os.path.join(input_dir, 'trend_subtracted.npy')
         self.ws_base = OptopatchBaseWorkspace.from_npy(input_file)
-        self.output_dir = output_dir
-        self.active_mask = np.load(active_range_file) if active_range_file is not None else None
-        print(self.active_mask)
+        
+        mask_file = os.path.join(input_dir, 'active_mask.npy')
+        self.active_mask = np.load(mask_file) if os.path.exists(mask_file) else None
         
         self.use_active_range = use_active_range
 
@@ -36,5 +36,5 @@ class Feature:
             max_depth=1)
 
         logging.info('Writing features to output directory...')
-        with open(os.path.join(self.output_dir, 'features.pkl'), 'wb') as f:
+        with open(os.path.join(self.input_dir, 'features.pkl'), 'wb') as f:
             pickle.dump(feature_extractor.features, f)

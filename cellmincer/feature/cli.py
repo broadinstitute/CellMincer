@@ -25,10 +25,7 @@ class CLI(AbstractCLI):
 
         # Ensure that if there's a tilde for $HOME in the file path, it works.
         try:
-            args.input_file = os.path.expanduser(args.input_file)
-            args.output_dir = os.path.expanduser(args.output_dir)
-            if args.active_range_file is not None:
-                args.active_range_file = os.path.expanduser(args.active_range_file)
+            args.input_dir = os.path.expanduser(args.input_dir)
         except TypeError:
             raise ValueError('Problem with provided input paths.')
 
@@ -50,7 +47,5 @@ class CLI(AbstractCLI):
                                       
         # compute global features
         Feature(
-            input_file=args.input_file,
-            output_dir=args.output_dir,
-            use_active_range=args.active_range,
-            active_range_file=args.active_range_file).run()
+            input_dir=args.input_dir,
+            use_active_range=args.active_range).run()
