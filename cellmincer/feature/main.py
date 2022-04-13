@@ -22,7 +22,7 @@ class Feature:
         
         self.ws_base = OptopatchBaseWorkspace.from_npy(input_file)
         self.output_dir = output_dir
-        self.active_mask = np.load(active_range_file) if active_range_file else None
+        self.active_mask = np.load(active_range_file) if active_range_file is not None else None
         print(self.active_mask)
         
         self.use_active_range = use_active_range

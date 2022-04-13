@@ -27,7 +27,8 @@ class CLI(AbstractCLI):
         try:
             args.input_file = os.path.expanduser(args.input_file)
             args.output_dir = os.path.expanduser(args.output_dir)
-            args.active_range_file = os.path.expanduser(args.active_range_file)
+            if args.active_range_file is not None:
+                args.active_range_file = os.path.expanduser(args.active_range_file)
         except TypeError:
             raise ValueError('Problem with provided input paths.')
 
