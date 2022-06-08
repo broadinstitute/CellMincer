@@ -14,5 +14,5 @@ scikit-learn
 scikit-video
 typing_extensions>=3.7.4, <4.0.0.0
 neptune-client>=0.14.2
-protobuf<4.21.0
+protobuf==3.19.4
 cosine_annealing_warmup @ https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup/tarball/master#egg=cosine_annealing_warmup
