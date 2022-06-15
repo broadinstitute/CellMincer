@@ -59,6 +59,10 @@ class Denoise:
         self.model.eval()
 
         denoised_txy = self.model.denoising_model.denoise_movie(self.ws_denoising).numpy()
+        
+        tifffile.imwrite(
+            os.path.join(self.output_dir, f'denoised_detrended_tyx.tif'),
+            denoised_txy.transpose((0, 2, 1)))
 
         if self.avi_enabled:
             denoised_norm_txy = self.normalize_movie(
