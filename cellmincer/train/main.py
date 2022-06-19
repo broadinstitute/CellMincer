@@ -39,6 +39,7 @@ class Train:
             output_dir: str,
             config: dict,
             gpus: int,
+            corpus_limit: int,
             pretrain: Optional[str] = None,
             checkpoint: Optional[str] = None):
         
@@ -85,7 +86,8 @@ class Train:
             datasets=inputs,
             model_config=config['model'],
             train_config=train_config,
-            gpus=gpus)
+            gpus=gpus,
+            corpus_limit=corpus_limit)
         
         if self.model is None:
             logging.info('Initializing new model.')

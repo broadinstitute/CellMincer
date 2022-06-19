@@ -173,7 +173,8 @@ def build_datamodule(
         datasets: List[str],
         model_config: dict,
         train_config: dict,
-        gpus: int) -> MovieDataModule:
+        gpus: int,
+        corpus_limit: int) -> MovieDataModule:
     logging.info('Loading datasets...')
     assert all([os.path.exists(dataset) for dataset in datasets])
 
@@ -182,6 +183,10 @@ def build_datamodule(
         logging.info(f'({i_dataset + 1}/{len(datasets)}) {dataset}')
         ws_denoising_list.append(build_ws_denoising(dataset, model_config))
 
+    length = gpus * train_config['n_batch']
+    if corpus_limit:
+        length = min(corpus_limit, length)
+    
     return MovieDataModule(
         ws_denoising_list,
         x_window=train_config['x_window'],
@@ -190,4 +195,4 @@ def build_datamodule(
         y_padding=train_config['y_padding'],
         t_total=get_temporal_order_from_config(model_config) + train_config['t_tandem'] - 1,
         n_batch=train_config['n_batch'],
-        length=gpus * train_config['n_batch'])
+        length=length)

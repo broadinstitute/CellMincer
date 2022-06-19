@@ -70,5 +70,14 @@ def add_subparser_args(subparsers: argparse) -> argparse:
         default=1,
         required=False,
         help='Number of GPUs to use for training.')
+    
+    subparser.add_argument(
+        '--corpus_limit',
+        nargs=None,
+        type=int,
+        dest='corpus_limit',
+        default=0,
+        required=False,
+        help='Maximum number of dataset copies that can be held in memory.')
 
     return subparsers
