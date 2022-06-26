@@ -103,25 +103,38 @@ class MovieDataModule(LightningDataModule):
             t_total: int,
             n_batch: int,
             length: int):
-        self.ws_denoising_list = ws_denoising_list
-        self.x_window = x_window
-        self.y_window = y_window
-        self.x_padding = x_padding
-        self.y_padding = y_padding
-        self.t_total = t_total
+        # self.ws_denoising_list = ws_denoising_list
+        # self.x_window = x_window
+        # self.y_window = y_window
+        # self.x_padding = x_padding
+        # self.y_padding = y_padding
+        # self.t_total = t_total
         self.n_batch = n_batch
-        self.length = length
+        # self.length = length
+        self.dataset = MovieDataset(
+            ws_denoising_list=ws_denoising_list,
+            x_window=x_window,
+            y_window=y_window,
+            x_padding=x_padding,
+            y_padding=y_padding,
+            t_total=t_total,
+            length=length)
+        self.n_global_features = ws_denoising_list[0].n_global_features
+
+    def prepare_data(self):
+        pass
     
     def setup(self, stage: Optional[str] = None):
-        self.dataset = MovieDataset(
-            ws_denoising_list=self.ws_denoising_list,
-            x_window=self.x_window,
-            y_window=self.y_window,
-            x_padding=self.x_padding,
-            y_padding=self.y_padding,
-            t_total=self.t_total,
-            length=self.length)
-    
+        pass
+        # self.dataset = MovieDataset(
+        #     ws_denoising_list=self.ws_denoising_list,
+        #     x_window=self.x_window,
+        #     y_window=self.y_window,
+        #     x_padding=self.x_padding,
+        #     y_padding=self.y_padding,
+        #     t_total=self.t_total,
+        #     length=self.length)
+
     def train_dataloader(self) -> "torch.dataloader":
         return DataLoader(
             dataset=self.dataset,
@@ -134,10 +147,6 @@ class MovieDataModule(LightningDataModule):
 
     def val_dataloader(self) -> "torch.dataloader":
         pass
-
-    @property
-    def n_global_features(self):
-        return self.ws_denoising_list[0].n_global_features
 
 def build_ws_denoising(
         dataset: str,

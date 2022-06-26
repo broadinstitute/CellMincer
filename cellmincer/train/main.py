@@ -121,7 +121,7 @@ class Train:
                 pl_logger.experiment['datasets'] = inputs
 
         self.trainer = Trainer(
-            strategy='ddp',
+            strategy='ddp_spawn',
             gpus=gpus,
             max_epochs=train_config['n_iters'],
             default_root_dir=self.output_dir,
