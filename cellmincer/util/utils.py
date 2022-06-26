@@ -6,7 +6,6 @@ from typing import Optional, Union, List, Tuple
 from bisect import bisect_left, bisect_right
 
 import torch
-from torch.optim.lr_scheduler import LambdaLR
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 
 from . import const

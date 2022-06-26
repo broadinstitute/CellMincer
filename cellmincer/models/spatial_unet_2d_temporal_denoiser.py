@@ -47,7 +47,7 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
             first_conv_channels=config['spatial_unet_first_conv_channels'],
             ch_growth_rate=2,
             ds_rate=2,
-            final_trans=lambda x: x,
+            final_trans=torch.nn.Identity(),
             pad=config['spatial_unet_padding'],
             layer_norm=config['spatial_unet_batch_norm'],
             attention=config['spatial_unet_attention'],
@@ -69,7 +69,7 @@ class SpatialUnet2dTemporalDenoiser(DenoisingModel):
             hidden_conv_channels=config['temporal_denoiser_conv_channels'],
             hidden_dense_layer_dims=config['temporal_denoiser_hidden_dense_layer_dims'],
             activation=activation_from_str(config['temporal_denoiser_activation']),
-            final_trans=lambda x: x)
+            final_trans=torch.nn.Identity())
     
     def forward(
             self,
