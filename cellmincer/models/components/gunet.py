@@ -68,9 +68,9 @@ class GUNet(nn.Module):
         self.out_channels_before_readout = out_channels_before_readout
         self.center_crop = _CENTER_CROP_DICT[data_dim]
         if pool_mode == 'max':
-            self.pool = _MAX_POOL_DICT[data_dim]
+            self.pool = _MAX_POOL_DICT[data_dim](kernel_size=ds_rate)
         elif pool_mode == 'avg':
-            self.pool = _AVG_POOL_DICT[data_dim]
+            self.pool = _AVG_POOL_DICT[data_dim](kernel_size=ds_rate)
         self.drop = nn.Dropout2d(p=p_dropout)
         
         # downward path
@@ -165,8 +165,8 @@ class GUNet(nn.Module):
                 features = self.center_crop(features, x)
                 features_list.append(features)
                 block_list.append(x)
-                features = self.pool(features, self.ds_rate)
-                x = self.drop(self.pool(x, self.ds_rate))
+                features = self.pool(features)
+                x = self.drop(self.pool(x))
             
         for i, up_op in enumerate(self.up_path):
             bridge = self.drop(torch.cat([features_list[-i - 1], block_list[-i - 1]], - self.data_dim - 1))
@@ -191,7 +191,7 @@ class GUNet(nn.Module):
             x = down_op(x)
             if i != len(self.down_path) - 1:
                 block_list.append(x)
-                x = self.pool(x, self.ds_rate)
+                x = self.pool(x)
             
         for i, up_op in enumerate(self.up_path):
             bridge = block_list[-i - 1]

@@ -1,6 +1,7 @@
 #!/bin/bash
 
-BRANCH=ld-refactoring
+# BRANCH=ld-refactoring
+BRANCH=bw-multigpu-fix
 BUCKET_PATH=gs://fc-secure-94c57cb0-5039-4596-9a9e-03c1cde4cc15/cellmincer_tarballs
 PWD=$(pwd)
 TMP_PATH=${PWD}/__tmp__

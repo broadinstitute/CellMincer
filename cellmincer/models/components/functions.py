@@ -62,15 +62,15 @@ _CONV_TRANS_DICT = {
 }
 
 _AVG_POOL_DICT = {
-    1: nn.functional.avg_pool1d,
-    2: nn.functional.avg_pool2d,
-    3: nn.functional.avg_pool3d
+    1: nn.AvgPool1d,
+    2: nn.AvgPool2d,
+    3: nn.AvgPool3d
 }
 
 _MAX_POOL_DICT = {
-    1: nn.functional.max_pool1d,
-    2: nn.functional.max_pool2d,
-    3: nn.functional.max_pool3d
+    1: nn.MaxPool1d,
+    2: nn.MaxPool2d,
+    3: nn.MaxPool3d
 }
 
 _NORM_DICT = {
