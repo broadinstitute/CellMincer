@@ -119,6 +119,8 @@ class Train:
                     tags=config['neptune']['tags'],
                     log_model_checkpoints=False)
                 pl_logger.experiment['datasets'] = inputs
+        else:
+            logging.info('Skipping Neptune initialization.')
 
         self.trainer = Trainer(
             strategy='ddp_spawn',
