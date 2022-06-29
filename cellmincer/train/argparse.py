@@ -70,5 +70,11 @@ def add_subparser_args(subparsers: argparse) -> argparse:
         default=1,
         required=False,
         help='Number of GPUs to use for training.')
+    
+    subparser.add_argument(
+        '--use_memmap',
+        dest='use_memmap',
+        action='store_true',
+        help='Use memmapped training data for large operations.')
 
     return subparsers

@@ -1,6 +1,7 @@
 import numpy as np
 from skimage.filters import threshold_otsu
 from boltons.cacheutils import cachedproperty
+import tempfile
 import torch
 import tifffile
 import logging
@@ -241,6 +242,7 @@ class OptopatchDenoisingWorkspace:
             features: OptopatchGlobalFeatureContainer,
             x_padding: int,
             y_padding: int,
+            use_memmap: bool,
             padding_mode: Optional[str] = 'reflect',
             occlude_padding: Optional[bool] = False,
             device: Optional[torch.device] = None):
@@ -279,13 +281,25 @@ class OptopatchDenoisingWorkspace:
 
             occluded_padding_map_txy[:, x_padding:-x_padding, y_padding:-y_padding] = movie_diff / features.norm_scale
         
-            self.padded_scaled_diff_movie_1txy = occluded_padding_map_txy[None, ...]
+            padded_scaled_diff_movie_1txy = occluded_padding_map_txy[None, ...]
 
         else:
-            self.padded_scaled_diff_movie_1txy = np.pad(
+            padded_scaled_diff_movie_1txy = np.pad(
                 array=movie_diff / features.norm_scale,
                 pad_width=((0, 0), (x_padding, x_padding), (y_padding, y_padding)),
                 mode=padding_mode)[None, ...]
+            
+        if use_memmap:
+            ftmp = tempfile.NamedTemporaryFile(delete=False)
+            fname = ftmp.name + ".npy"
+            np.save(fname, padded_scaled_diff_movie_1txy)
+            self.padded_scaled_diff_movie_1txy = np.memmap(
+                fname,
+                dtype=padded_scaled_diff_movie_1txy.dtype,
+                mode='r',
+                shape=padded_scaled_diff_movie_1txy.shape)
+        else:
+            self.padded_scaled_diff_movie_1txy = padded_scaled_diff_movie_1txy
 
     @cachedproperty
     def padded_scaled_bg_movie_1txy(self) -> np.ndarray:

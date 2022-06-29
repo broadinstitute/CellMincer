@@ -39,6 +39,7 @@ class Train:
             output_dir: str,
             config: dict,
             gpus: int,
+            use_memmap: bool,
             pretrain: Optional[str] = None,
             checkpoint: Optional[str] = None):
         
@@ -85,7 +86,8 @@ class Train:
             datasets=inputs,
             model_config=config['model'],
             train_config=train_config,
-            gpus=gpus)
+            gpus=gpus,
+            use_memmap=use_memmap)
         
         if self.model is None:
             logging.info('Initializing new model.')
@@ -123,7 +125,7 @@ class Train:
             logging.info('Skipping Neptune initialization.')
 
         self.trainer = Trainer(
-            strategy='ddp_spawn',
+            strategy='ddp',
             gpus=gpus,
             max_epochs=train_config['n_iters'],
             default_root_dir=self.output_dir,

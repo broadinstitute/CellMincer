@@ -151,6 +151,7 @@ class MovieDataModule(LightningDataModule):
 def build_ws_denoising(
         dataset: str,
         model_config: dict,
+        use_memmap: bool,
         device: Optional[torch.device] = None):
     movie_diff = np.load(os.path.join(dataset, 'trend_subtracted.npy'))
     movie_bg_path = os.path.join(dataset, 'trend.npy')
@@ -174,6 +175,7 @@ def build_ws_denoising(
         features=feature_container,
         x_padding=padding,
         y_padding=padding,
+        use_memmap=use_memmap,
         padding_mode=model_config['padding_mode'],
         occlude_padding=model_config['occlude_padding'],
         device=device)
@@ -182,14 +184,15 @@ def build_datamodule(
         datasets: List[str],
         model_config: dict,
         train_config: dict,
-        gpus: int) -> MovieDataModule:
+        gpus: int,
+        use_memmap: bool) -> MovieDataModule:
     logging.info('Loading datasets...')
     assert all([os.path.exists(dataset) for dataset in datasets])
 
     ws_denoising_list = []
     for i_dataset, dataset in enumerate(datasets):
         logging.info(f'({i_dataset + 1}/{len(datasets)}) {dataset}')
-        ws_denoising_list.append(build_ws_denoising(dataset, model_config))
+        ws_denoising_list.append(build_ws_denoising(dataset, model_config, use_memmap))
 
     return MovieDataModule(
         ws_denoising_list,

@@ -73,5 +73,6 @@ class CLI(AbstractCLI):
             output_dir=args.output_dir,
             config=config,
             gpus=args.gpus,
+            use_memmap=args.use_memmap,
             pretrain=args.pretrain,
             checkpoint=args.checkpoint).run()
