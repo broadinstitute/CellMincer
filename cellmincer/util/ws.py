@@ -290,6 +290,7 @@ class OptopatchDenoisingWorkspace:
                 mode=padding_mode)[None, ...]
             
         if use_memmap:
+            logging.info('Memory map enabled; writing array to temporary file...')
             ftmp = tempfile.NamedTemporaryFile(delete=False)
             fname = ftmp.name + ".npy"
             np.save(fname, padded_scaled_diff_movie_1txy)
@@ -299,6 +300,7 @@ class OptopatchDenoisingWorkspace:
                 mode='r',
                 shape=padded_scaled_diff_movie_1txy.shape)
         else:
+            logging.info('Memory map disabled; retaining array in memory...')
             self.padded_scaled_diff_movie_1txy = padded_scaled_diff_movie_1txy
 
     @cachedproperty

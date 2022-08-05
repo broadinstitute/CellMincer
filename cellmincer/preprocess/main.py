@@ -266,6 +266,13 @@ class Preprocess:
             noise_model_params: dict) -> Tuple[List, List]:
         
         logging.info('Detrending movie...')
+
+        assert self.detrend_config['smoothing'] in ('none', 'median')
+
+        if self.detrend_config['smoothing'] == 'median':
+            fit_movie_txy = self.apply_median_smoothing(movie_txy)
+        elif self.detrend_config['smoothing'] == 'median':
+            fit_movie_txy = movie_txy
         
         # time coordinates of segments
         t_trimmed_list = []
@@ -278,7 +285,8 @@ class Preprocess:
         
         for i_segment in range(self.n_segments):
             # get segment for fitting
-            t_fit, fit_seg_txy = self.get_flanking_segments(movie_txy, i_segment)
+            t_fit, fit_seg_txy = self.get_flanking_segments(fit_movie_txy, i_segment)
+
             t_fit_torch = torch.tensor(t_fit, device=self.device, dtype=const.DEFAULT_DTYPE)
             fit_seg_txy_torch = torch.tensor(fit_seg_txy, device=self.device, dtype=const.DEFAULT_DTYPE)
             width, height = fit_seg_txy_torch.shape[1:]
@@ -326,8 +334,10 @@ class Preprocess:
             if self.detrend_config['plot_segments']:
                 fig = plt.figure()
                 ax = plt.gca()
-                ax.scatter(t_trimmed, np.mean(trimmed_seg_txy, axis=(-1, -2)), s=1)
-                ax.scatter(t_trimmed, np.mean(mu_txy, axis=(-1, -2)), s=1)
+                ax.scatter(t_trimmed, np.mean(trimmed_seg_txy, axis=(-1, -2)), s=1, label='trimmed')
+                ax.scatter(t_fit, np.mean(fit_seg_txy, axis=(-1, -2)), s=1, label='fit')
+                ax.scatter(t_trimmed, np.mean(mu_txy, axis=(-1, -2)), s=1, label='trend')
+                ax.legend()
                 ax.set_title(f'segment {i_segment + 1}')
 
                 fig.savefig(os.path.join(self.plot_dir, f'detrend_{i_segment + 1}.png'))
@@ -401,6 +411,21 @@ class Preprocess:
         t = np.asarray([i_t - t_begin_left for i_t in i_t_list]) / self.sampling_rate
 
         return t, movie_txy[i_t_list, ...]
+    
+    def apply_median_smoothing(
+            self,
+            movie_txy: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        # force window length to be odd
+        window_length = self.detrend_config['smoothing_window']
+        if window_length % 2 == 0:
+            window_length += 1
+        pad_length = window_length // 2
+        
+        padded_movie_txy = np.pad(movie_txy, ((pad_length, pad_length), (0, 0), (0, 0)), 'edge')
+        median_txy = np.stack([np.median(padded_movie_txy[i:i + window_length], axis=0) for i in range(movie_txy.shape[0])], axis=0)
+        
+        print('LOG LOG', median_txy.shape)
+        return median_txy
     
     @staticmethod
     def ws_base_from_input_manifest(
