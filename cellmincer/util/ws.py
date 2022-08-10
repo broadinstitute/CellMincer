@@ -243,6 +243,7 @@ class OptopatchDenoisingWorkspace:
             x_padding: int,
             y_padding: int,
             use_memmap: bool,
+            clip: float = 0,
             padding_mode: Optional[str] = 'reflect',
             occlude_padding: Optional[bool] = False,
             device: Optional[torch.device] = None):
@@ -288,7 +289,11 @@ class OptopatchDenoisingWorkspace:
                 array=movie_diff / features.norm_scale,
                 pad_width=((0, 0), (x_padding, x_padding), (y_padding, y_padding)),
                 mode=padding_mode)[None, ...]
-            
+
+        assert clip >= 0
+        if clip > 0:
+            np.clip(padded_scaled_diff_movie_1txy, -clip, clip, out=padded_scaled_diff_movie_1txy)
+
         if use_memmap:
             logging.info('Memory map enabled; writing array to temporary file...')
             ftmp = tempfile.NamedTemporaryFile(delete=False)

@@ -176,6 +176,7 @@ def build_ws_denoising(
         x_padding=padding,
         y_padding=padding,
         use_memmap=use_memmap,
+        clip=model_config.get('clip', 0),
         padding_mode=model_config['padding_mode'],
         occlude_padding=model_config['occlude_padding'],
         device=device)
