@@ -271,7 +271,7 @@ class Preprocess:
 
         if self.detrend_config['smoothing'] == 'median':
             fit_movie_txy = self.apply_median_smoothing(movie_txy)
-        elif self.detrend_config['smoothing'] == 'median':
+        elif self.detrend_config['smoothing'] == 'none':
             fit_movie_txy = movie_txy
         
         # time coordinates of segments
