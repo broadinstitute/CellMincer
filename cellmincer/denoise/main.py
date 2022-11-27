@@ -60,6 +60,8 @@ class Denoise:
         self.model.eval()
 
         denoised_txy = self.model.denoising_model.denoise_movie(self.ws_denoising).numpy()
+
+        denoised_txy *= self.ws_denoising.cached_features.norm_scale
         
         tifffile.imwrite(
             os.path.join(self.output_dir, f'denoised_detrended_tyx.tif'),
@@ -87,7 +89,6 @@ class Denoise:
                 writer.writeFrame(denoised_norm_txy[i_frame].T[None, ...])
             writer.close()
 
-        denoised_txy *= self.ws_denoising.cached_features.norm_scale
         denoised_txy += self.ws_denoising.bg_movie_txy
         
         if self.clean is not None:
