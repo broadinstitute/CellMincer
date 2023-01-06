@@ -111,15 +111,15 @@ class Train:
                     api_token=config['neptune']['api_token'],
                     project=config['neptune']['project'],
                     run=self.model.neptune_run_id,
-                    tags=config['neptune']['tags'])
+                    tags=config['neptune']['tags'],
+                    capture_hardware_metrics=False)
                 pl_logger = NeptuneLogger(run=neptune_run)
             else:
                 logging.info('Initializing new Neptune run...')
                 pl_logger = NeptuneLogger(
                     api_key=config['neptune']['api_token'],
                     project=config['neptune']['project'],
-                    tags=config['neptune']['tags'],
-                    log_model_checkpoints=False)
+                    tags=config['neptune']['tags'])
                 pl_logger.experiment['datasets'] = inputs
         else:
             logging.info('Skipping Neptune initialization.')

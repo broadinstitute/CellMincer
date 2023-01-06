@@ -424,7 +424,6 @@ class Preprocess:
         padded_movie_txy = np.pad(movie_txy, ((pad_length, pad_length), (0, 0), (0, 0)), 'edge')
         median_txy = np.stack([np.median(padded_movie_txy[i:i + window_length], axis=0) for i in range(movie_txy.shape[0])], axis=0)
         
-        print('LOG LOG', median_txy.shape)
         return median_txy
     
     @staticmethod
