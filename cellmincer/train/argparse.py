@@ -60,7 +60,16 @@ def add_subparser_args(subparsers: argparse) -> argparse:
         dest='checkpoint',
         default=None,
         required=False,
-        help='Checkpoint file for resuming training.')
+        help='Checkpoint file for resuming training on preemptible machines.')
+    
+    subparser.add_argument(
+        '--checkpoint_start',
+        nargs=None,
+        type=str,
+        dest='checkpoint_start',
+        default=None,
+        required=False,
+        help='Checkpoint file for restarting training from an aborted run.')
 
     subparser.add_argument(
         '--gpus',

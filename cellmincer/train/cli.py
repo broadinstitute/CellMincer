@@ -32,6 +32,8 @@ class CLI(AbstractCLI):
                 args.pretrain = os.path.expanduser(args.pretrain)
             if args.checkpoint:
                 args.checkpoint = os.path.expanduser(args.checkpoint)
+            if args.checkpoint_start:
+                args.checkpoint_start = os.path.expanduser(args.checkpoint_start)
         except TypeError:
             raise ValueError('Problem with provided input paths.')
 
@@ -75,4 +77,5 @@ class CLI(AbstractCLI):
             gpus=args.gpus,
             use_memmap=args.use_memmap,
             pretrain=args.pretrain,
-            checkpoint=args.checkpoint).run()
+            checkpoint=args.checkpoint,
+            checkpoint_start=args.checkpoint_start).run()

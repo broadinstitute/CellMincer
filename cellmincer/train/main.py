@@ -41,7 +41,8 @@ class Train:
             gpus: int,
             use_memmap: bool,
             pretrain: Optional[str] = None,
-            checkpoint: Optional[str] = None):
+            checkpoint: Optional[str] = None,
+            checkpoint_start: Optional[str] = None):
         
         self.model = None
         if pretrain:
@@ -55,6 +56,19 @@ class Train:
         
         # if continuing from checkpoint
         self.ckpt_path = None
+        if checkpoint_start is not None and os.path.exists(checkpoint_start):
+            try:
+                resume_model = load_model_from_checkpoint(
+                    model_type=config['model']['type'],
+                    ckpt_path=checkpoint_start)
+                self.model = resume_model
+                self.ckpt_path = checkpoint_start
+                logging.info('Successfully loaded restarted checkpoint.')
+            except EOFError:
+                logging.warning('Bad checkpoint; ignoring checkpointed restart state.')
+                pass
+        
+        # if continuing from checkpoint
         if checkpoint is not None and os.path.exists(checkpoint):
             try:
                 resume_model = load_model_from_checkpoint(
@@ -64,7 +78,7 @@ class Train:
                 self.ckpt_path = checkpoint
                 logging.info('Successfully loaded checkpoint.')
             except EOFError:
-                logging.warning('Bad checkpoint; aborting checkpointed state. Expected behavior when Terra first initializes training.')
+                logging.warning('Bad checkpoint; ignoring checkpointed state. Expected behavior when Terra first initializes training.')
                 pass
         
         if self.model:
