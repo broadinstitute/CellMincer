@@ -1,5 +1,0 @@
-clean_path: /home/jupyter/bw-data/cellmincer/data/optosynth_first_wave__1__20__50/clean_movie_tyx.npy
-denoised_path: /home/jupyter/bw-data/cellmincer/denoise/optosynth-const-lr/optosynth_first_wave__1__20__50__denoised_tyx.npy
-insight_dir: /home/jupyter/bw-data/cellmincer/insight
-log_dir: /home/jupyter/bw-data/cellmincer/logs
-peak: 65535

@@ -1,9 +1,0 @@
-datasets:
-- cell_3_1_MMStack_Pos0
-- cell_3_2_MMStack_Pos0
-- std_1_MMStack_Pos0
-- std_2_MMStack_Pos0
-- std_3_MMStack_Pos0
-device: cpu
-log_dir: /home/jupyter/bw-data/cellmincer/logs
-root_data_dir: /home/jupyter/bw-data/cellmincer/data

@@ -1,9 +1,0 @@
-datasets:
-- D1_FOV3_W2_at135105
-- D4_FOV2_W2_at171603
-- D4_FOV3_W2_at172029
-- E3_FOV1_W2_at155440
-- F1_FOV2_W1_at143005
-device: cpu
-log_dir: /home/jupyter/bw-data/cellmincer/logs
-root_data_dir: /home/jupyter/bw-data/cellmincer/data
