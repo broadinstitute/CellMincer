@@ -343,7 +343,7 @@ class Preprocess:
         # compute active range mask if stim params provided
         active_mask = None
         if self.stim:
-            active_mask = np.zeros(self.n_frames_per_segment * self.n_segments, dtype=np.bool)
+            active_mask = np.zeros(self.n_frames_per_segment * self.n_segments, dtype=bool)
             for i_seg in range(self.stim['segment_start'], self.stim['segment_end']):
                 active_mask[i_seg * self.n_frames_per_segment + self.stim['frame_start']:
                      i_seg * self.n_frames_per_segment + self.stim['frame_end']] = 1
@@ -352,7 +352,7 @@ class Preprocess:
                      (i_seg + 1) * self.n_frames_per_segment - self.trim['trim_right']]
                 for i_seg in range(self.n_segments)])
         elif not self.infer_active_t_range:
-            active_mask = np.ones((movie_txy.shape[0],), dtype=np.bool)
+            active_mask = np.ones((movie_txy.shape[0],), dtype=bool)
 
         logging.info('Extracting features...')
         feature_extractor = OptopatchGlobalFeatureExtractor(

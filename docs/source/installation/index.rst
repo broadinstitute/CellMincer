@@ -26,6 +26,6 @@ Install with ``pip`` from Git repository:
 
 .. code-block:: console
 
-   (cellmincer) $ pip install git+https://github.com/broadinstitute/CellMincer.git
+   (cellmincer) $ python -m pip install git+https://github.com/broadinstitute/CellMincer.git
 
 Because CellMincer uses GPU computing for both training on and denoising voltage imaging, you may wish to confirm that your machine has GPUs with appropriate drivers installed and is CUDA-enabled (e.g. check that ``torch.cuda.is_available()`` returns ``True``).
